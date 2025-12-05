@@ -234,9 +234,7 @@ plt.ylabel('True')
 plt.savefig('outputs/plots/confusion_matrix_labour.png')
 plt.close()
 
-# ---------------------------
 # Step 9 - Prepare EQUIPMENT Data & Train Model
-# ---------------------------
 X_equip_text = DF_equip['request_text'].values
 y_equip      = DF_equip[equipment_label_col].values
 
@@ -294,9 +292,7 @@ plt.ylabel('True')
 plt.savefig('outputs/plots/confusion_matrix_equipment.png')
 plt.close()
 
-# ---------------------------
 # Step 10 - Semantic Model + Save Everything
-# ---------------------------
 print("🔁 Computing semantic embeddings (labour + equipment)...")
 model_semantic = SentenceTransformer('all-MiniLM-L6-v2')
 
