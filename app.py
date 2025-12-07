@@ -156,3 +156,8 @@ def recommend():
         'labour_recommendations': labour_results,
         'equipment_recommendations': equip_results
     })
+
+
+# Run server
+if __name__ == '__main__':
+    app.run(debug=True)
