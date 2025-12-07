@@ -63,9 +63,7 @@ def recommend():
     # -----------------------------------
     query_emb = semantic_model.encode(query, convert_to_tensor=True)
 
-    # -----------------------------------
     # 3. Labour recommendations
-    # -----------------------------------
     df_lab = DF_labour.copy()
     if 'Labour_Type_collapsed' in df_lab.columns:
         df_lab = df_lab[df_lab['Labour_Type_collapsed'] == labour_label]
@@ -106,9 +104,7 @@ def recommend():
 
             labour_results = df_lab[columns_to_send].to_dict(orient='records')
 
-    # -----------------------------------
     # 4. Equipment recommendations
-    # -----------------------------------
     df_eq = DF_equip.copy()
     if 'Equipment_Type' in df_eq.columns:
         df_eq = df_eq[df_eq['Equipment_Type'] == equip_label]
@@ -152,9 +148,7 @@ def recommend():
 
             equip_results = df_eq[equip_columns_to_send].to_dict(orient='records')
 
-    # -----------------------------------
     # 5. Return results as JSON
-    # -----------------------------------
     return jsonify({
         'query': query,
         'predicted_labour_type': labour_label,
@@ -162,10 +156,3 @@ def recommend():
         'labour_recommendations': labour_results,
         'equipment_recommendations': equip_results
     })
-
-
-# -----------------------------
-# Run server
-# -----------------------------
-if __name__ == '__main__':
-    app.run(debug=True)
