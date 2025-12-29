@@ -1,0 +1,26 @@
+{
+  "inputs_used": [
+    "temperature",
+    "ph",
+    "nitrogen",
+    "phosphorous",
+    "potassium",
+    "soil",
+    "crop",
+    "growth_stage"
+  ],
+  "numeric_cols": [
+    "temperature",
+    "ph",
+    "nitrogen",
+    "phosphorous",
+    "potassium"
+  ],
+  "categorical_cols": [
+    "soil",
+    "crop",
+    "growth_stage"
+  ],
+  "classification_target": "fertilizer_type",
+  "regression_target": "yield_kg_per_acre"
+}
