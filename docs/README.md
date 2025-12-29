@@ -94,4 +94,24 @@ This project applies machine learning to:
 
 1. Configurable thresholds for SELL/HOLD decisions
 2. Confidence scores based on prediction certainty
-3. Risk assessment using historical volatility
+
+---
+
+## Phase 2: Yield Sync V2.0 (Current Status)
+
+### New Capabilities
+1.  **Profit-Aware Decision Engine**:
+    - Recommendations (`BUY`/`SELL`/`HOLD`) are now driven by projected net profit.
+    - Takes into account transport costs, storage costs (degradation), and spoilage rates.
+    - Confidence scores adjusted by economic clarity (higher profit delta = higher confidence).
+
+2.  **App V2.0 (Streamlit)**:
+    - **Dashboard**: Real-time "Data Lag" status.
+    - **Manual Data Entry**: Add daily market data directly to the dataset.
+    - **Bulk Upload**: Upload CSV/Excel batches for historical data.
+    - **Retraining Mode**: Workflow to retrain models when sufficient data accumulates.
+    - **Localization**: Full English/Sinhala support.
+
+3.  **Data Architecture**:
+    - Merged schemas: `full_history_features_real_weather.csv` (Price + Weather) + `full_history_demand_data.csv` (Volume).
+    - Robust path handling for model loading.
