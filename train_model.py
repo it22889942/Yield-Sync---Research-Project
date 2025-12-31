@@ -1,6 +1,4 @@
-# train.py
 # 100% ML Recommendation Engine (Local VS Code Version)
-# ----------------------------------------------------
 
 import os, joblib, warnings
 import pandas as pd
