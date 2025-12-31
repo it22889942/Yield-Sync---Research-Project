@@ -10,7 +10,7 @@ OUTPUTS_DIR = "outputs"   # parent folder
 # Auto-pick the latest timestamp folder inside outputs (e.g., outputs/20251108_113015)
 MODEL_DIR = None
 
-app = Flask(__name__)
+app = Flask(__name_
 
 
 def find_latest_output_dir(base="outputs"):
