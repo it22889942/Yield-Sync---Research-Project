@@ -232,7 +232,9 @@ def total_fertilizer():
     total = round(area * rate, 2)
 
     return jsonify({
-        
+        "area_acres": area,
+        "rate_kg_per_acre": rate,
+        "total_fertilizer_kg": total
     })
 
 
