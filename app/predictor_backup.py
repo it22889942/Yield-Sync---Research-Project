@@ -43,62 +43,55 @@ class SmartFarmingPredictor:
     - Red Onion: LightGBM (45-day consecutive)
     """
     
-    # Per-crop configurations - matching notebooks/demand forecasting/demand_forecasting.ipynb
-    # Models stored in models/saved_models/demand forcasting/
+    # Per-crop configurations matching notebooks exactly
+    # Per-crop configurations matching notebooks exactly
     DEMAND_CONFIG = {
         'Rice': {
             'model_type': 'LSTM',
             'lag_days': 60,
             'univariate': True,
-            'model_file': 'demand forcasting/demand_Rice_lstm.h5'
+            'model_file': os.path.join('demand forcasting', 'demand_Rice_lstm.h5')
         },
         'Beetroot': {
             'model_type': 'RandomForest',
             'lag_days': 7,
             'univariate': False,
-            'model_file': 'demand forcasting/demand_Beetroot_rf.pkl'
+            'model_file': os.path.join('demand forcasting', 'demand_Beetroot_rf.pkl')
         },
         'Radish': {
             'model_type': 'RandomForest',
             'lag_days': 90,
             'univariate': False,
-            'model_file': 'demand forcasting/demand_Radish_rf.pkl'
+            'model_file': os.path.join('demand forcasting', 'demand_Radish_rf.pkl')
         },
         'Red Onion': {
             'model_type': 'LightGBM',
             'lag_days': 45,
             'univariate': False,
-            'model_file': 'demand forcasting/demand_Red Onion_lgb.pkl'
+            'model_file': os.path.join('demand forcasting', 'demand_Red Onion_lgb.pkl')
         }
     }
     
-    # Per-crop configurations - matching notebooks/price forecasting/2_model_comparison.ipynb
-    # Models stored in models/saved_models/price forcasting/
     PRICE_CONFIG = {
         'Rice': {
             'model_type': 'LSTM',
             'lag_days': 60,
-            'model_file': 'price forcasting/rice_lstm.h5',
-            'scalers_file': 'price forcasting/rice_lstm_scalers.joblib',
-            'config_file': 'price forcasting/rice_config.joblib'
+            'model_file': os.path.join('price forcasting', 'rice_lstm.h5')
         },
         'Beetroot': {
             'model_type': 'RandomForest',
             'lag_days': 7,
-            'model_file': 'price forcasting/beetroot_rf.joblib',
-            'config_file': 'price forcasting/beetroot_config.joblib'
+            'model_file': os.path.join('price forcasting', 'beetroot_rf.joblib')
         },
         'Radish': {
             'model_type': 'RandomForest',
             'lag_days': 90,
-            'model_file': 'price forcasting/radish_rf.joblib',
-            'config_file': 'price forcasting/radish_config.joblib'
+            'model_file': os.path.join('price forcasting', 'radish_rf.joblib')
         },
         'Red Onion': {
             'model_type': 'LightGBM',
             'lag_days': 45,
-            'model_file': 'price forcasting/red_onion_lgbm.joblib',
-            'config_file': 'price forcasting/red_onion_config.joblib'
+            'model_file': os.path.join('price forcasting', 'red_onion_lgbm.joblib')
         }
     }
 
@@ -111,207 +104,66 @@ class SmartFarmingPredictor:
         'Red Onion': 45.2
     }
     
-    def __init__(self, model_base_dir: str = None):
+    def __init__(self, model_base_dir: str = '../'):
         """
         Initialize predictor and load all models.
         
         Args:
-            model_base_dir: Path to saved_models directory (containing demand forcasting/ and price forcasting/)
+            model_base_dir: Path to root directory (containing saved_models/)
         """
-        if model_base_dir is None:
-            # Auto-detect: look for models/saved_models/ from project root
-            base_dir = os.path.dirname(os.path.abspath(__file__))  # app/
-            project_root = os.path.dirname(base_dir)  # project root
-            model_base_dir = os.path.join(project_root, 'models', 'saved_models')
-        
         self.model_base_dir = model_base_dir
         self.demand_models = {}
         self.price_models = {}
-        self.price_scalers = {}   # Scalers for LSTM price models
-        self.price_configs = {}   # Config for each price model
+        self.demand_scalers = {}  # Scalers for demand prediction
+        self.price_scalers = {}   # Scalers for price prediction
         
         self._load_all_models()
     
     def _load_all_models(self):
-        """Load all models from models/saved_models/ directory (matching notebooks)."""
+        """Load all 8 models (4 demand + 4 price) from saved_models directory."""
+        model_dir = os.path.join(self.model_base_dir, 'saved_models')
         
+        if not os.path.exists(model_dir):
+            print(f"⚠️ Model directory not found: {model_dir}")
+            return
+        
+        # Load demand models
         print("\n" + "="*60)
         print("LOADING DEMAND MODELS")
         print("="*60)
-        
         for crop, config in self.DEMAND_CONFIG.items():
             try:
-                model_path = os.path.join(self.model_base_dir, config['model_file'])
-                
-                if not os.path.exists(model_path):
-                    print(f"✗ {crop:12} model not found: {model_path}")
-                    continue
-                
+                filepath = os.path.join(model_dir, config['model_file'])
                 if config['model_type'] == 'LSTM':
-                    self.demand_models[crop] = load_model(model_path, compile=False)
+                    self.demand_models[crop] = load_model(filepath, compile=False)
                 else:
-                    # RandomForest or LightGBM - load with joblib
-                    self.demand_models[crop] = joblib.load(model_path)
-                
-                print(f"✓ {crop:12} ({config['model_type']:12}) loaded")
-                    
+                    self.demand_models[crop] = joblib.load(filepath)
+                print(f"✓ {crop:12} ({config['model_type']:12} {config['lag_days']:3}d) loaded")
             except Exception as e:
-                print(f"✗ {crop:12} - Error: {str(e)[:50]}")
+                print(f"✗ {crop:12} - {str(e)[:45]}")
         
+        # Load price models
         print("\n" + "="*60)
         print("LOADING PRICE MODELS")
         print("="*60)
-        
         for crop, config in self.PRICE_CONFIG.items():
             try:
-                model_path = os.path.join(self.model_base_dir, config['model_file'])
-                
-                if not os.path.exists(model_path):
-                    print(f"✗ {crop:12} model not found: {model_path}")
-                    continue
-                
+                filepath = os.path.join(model_dir, config['model_file'])
                 if config['model_type'] == 'LSTM':
-                    self.price_models[crop] = load_model(model_path, compile=False)
-                    # Load scalers for LSTM
-                    if 'scalers_file' in config:
-                        scalers_path = os.path.join(self.model_base_dir, config['scalers_file'])
-                        if os.path.exists(scalers_path):
-                            self.price_scalers[crop] = joblib.load(scalers_path)
-                            print(f"  ✓ {crop:12} scalers loaded")
+                    self.price_models[crop] = load_model(filepath, compile=False)
                 else:
-                    # RandomForest or LightGBM
-                    self.price_models[crop] = joblib.load(model_path)
-                
-                # Load config
-                if 'config_file' in config:
-                    config_path = os.path.join(self.model_base_dir, config['config_file'])
-                    if os.path.exists(config_path):
-                        self.price_configs[crop] = joblib.load(config_path)
-                
-                print(f"✓ {crop:12} ({config['model_type']:12}) loaded")
-                    
+                    self.price_models[crop] = joblib.load(filepath)
+                print(f"✓ {crop:12} ({config['model_type']:12} {config['lag_days']:3}d) loaded")
             except Exception as e:
-                print(f"✗ {crop:12} - Error: {str(e)[:50]}")
-        
-        print("\n" + "="*60)
-        print("MODEL LOADING COMPLETE")
-        print(f"Demand models loaded: {len(self.demand_models)}/4")
-        print(f"Price models loaded: {len(self.price_models)}/4")
-        print("="*60 + "\n")
-    
-    def _add_temporal_features(self, data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add temporal and seasonal features matching notebook preprocessing.
-        Features: day_of_week, month, quarter, day_of_year, is_weekend, season_encoded, harvest_period
-        """
-        df = data.copy()
-        df['Date'] = pd.to_datetime(df['Date'])
-        
-        # Time-based features
-        df['day_of_week'] = df['Date'].dt.dayofweek
-        df['month'] = df['Date'].dt.month
-        df['quarter'] = df['Date'].dt.quarter
-        df['day_of_year'] = df['Date'].dt.dayofyear
-        df['is_weekend'] = (df['day_of_week'] >= 5).astype(int)
-        
-        # Sri Lankan seasons: Maha (Oct-Mar), Yala (Apr-Sep)
-        df['season_encoded'] = df['month'].apply(lambda x: 1 if x in [10,11,12,1,2,3] else 0)
-        
-        # Harvest period
-        df['harvest_period'] = df['month'].apply(lambda x: 1 if x in [1,2,3,8,9] else 0)
-        
-        return df
+                print(f"✗ {crop:12} - {str(e)[:45]}")
     
     def _create_demand_features(self, data: pd.DataFrame, crop: str) -> Optional[np.ndarray]:
         """
-        Create demand features matching demand_forecasting.ipynb EXACTLY.
-        
-        Feature structure for multivariate models (Beetroot/Radish/Red Onion):
-        - qty_lag_1, qty_lag_2, ... qty_lag_N
-        - price_lag_1, price_lag_2, ... price_lag_N
-        - day_of_week, month, quarter, day_of_year, is_weekend, season_encoded, harvest_period
-        
-        Rice LSTM is univariate: only qty_lag_1 to qty_lag_60
-        
-        Expected feature counts:
-        - Rice: 60 (univariate)
-        - Beetroot: 21 = 7 + 7 + 7 temporal
-        - Radish: 187 = 90 + 90 + 7 temporal
-        - Red Onion: 97 = 45 + 45 + 7 temporal
+        Create demand lag features (consecutive days) matching demand_forecasting.ipynb.
+        Returns feature vector ready for model prediction.
         """
         config = self.DEMAND_CONFIG[crop]
         lag_days = config['lag_days']
-        
-        # Add temporal features
-        data_with_features = self._add_temporal_features(data)
-        
-        # Filter crop data and sort by date
-        crop_data = data_with_features[data_with_features['item'] == crop].copy().sort_values('Date')
-        
-        if len(crop_data) < lag_days:
-            return None, f"Insufficient data: need {lag_days} days, have {len(crop_data)}"
-        
-        # Get last lag_days of data
-        latest_data = crop_data.iloc[-lag_days:]
-        
-        # Rice LSTM: Univariate (only quantity lags)
-        if config['univariate']:
-            # qty_lag_1 to qty_lag_N (reversed so lag_1 = most recent)
-            qty_lags = latest_data['quantity_tonnes'].values[::-1]  # Reverse for lag ordering
-            feature_vector = qty_lags.reshape(1, -1)
-            return feature_vector, None
-        
-        # Multivariate models (Beetroot, Radish, Red Onion)
-        # Order: qty_lags, price_lags, temporal features (7 features)
-        
-        # Quantity lags (lag_1 to lag_N, reversed)
-        qty_lags = latest_data['quantity_tonnes'].values[::-1]
-        
-        # Price lags (lag_1 to lag_N, reversed)
-        price_lags = latest_data['price'].values[::-1]
-        
-        # Temporal features from the LAST row (current day)
-        last_row = crop_data.iloc[-1]
-        temporal_features = np.array([
-            last_row['day_of_week'],
-            last_row['month'],
-            last_row['quarter'],
-            last_row['day_of_year'],
-            last_row['is_weekend'],
-            last_row['season_encoded'],
-            last_row['harvest_period']
-        ])
-        
-        # Concatenate all features
-        feature_vector = np.concatenate([qty_lags, price_lags, temporal_features]).reshape(1, -1)
-        
-        return feature_vector, None
-    
-    def _create_price_features(self, data: pd.DataFrame, crop: str) -> Optional[np.ndarray]:
-        """
-        Create price features matching 2_model_comparison.ipynb EXACTLY.
-        
-        Feature structure for multivariate models (Beetroot/Radish/Red Onion):
-        - price_lag_1, price_lag_2, ... price_lag_N (for each lag day)
-        - temp_lag_1, temp_lag_2, ... temp_lag_N
-        - rainfall_lag_1, rainfall_lag_2, ... rainfall_lag_N
-        - humidity_lag_1, humidity_lag_2, ... humidity_lag_N
-        - wind_speed_lag_1, wind_speed_lag_2, ... wind_speed_lag_N
-        - sunshine_hours_lag_1, sunshine_hours_lag_2, ... sunshine_hours_lag_N
-        
-        Rice LSTM is univariate: only price lags
-        
-        Expected feature counts:
-        - Rice LSTM: 60 (price only, scaled)
-        - Beetroot RF: 42 = 7 × 6 (price + 5 weather features)
-        - Radish RF: 540 = 90 × 6
-        - Red Onion LGB: 270 = 45 × 6
-        """
-        config = self.PRICE_CONFIG[crop]
-        lag_days = config['lag_days']
-        
-        # Weather feature columns
-        weather_cols = ['temp', 'rainfall', 'humidity', 'wind_speed', 'sunshine_hours']
         
         # Filter crop data and sort by date
         crop_data = data[data['item'] == crop].copy().sort_values('Date')
@@ -319,42 +171,42 @@ class SmartFarmingPredictor:
         if len(crop_data) < lag_days:
             return None, f"Insufficient data: need {lag_days} days, have {len(crop_data)}"
         
-        # Get last lag_days of data
-        latest_data = crop_data.iloc[-lag_days:]
+        # Get last lag_days of quantity data
+        latest_qty = crop_data['quantity_tonnes'].values[-lag_days:]
         
-        # Rice LSTM: Univariate (price only)
-        if config['model_type'] == 'LSTM':
-            # Only price lags for Rice LSTM
-            price_lags = latest_data['price'].values
-            feature_vector = price_lags.reshape(1, -1)
-            return feature_vector, None
+        # Univariate features (qty lags only) for Rice LSTM
+        if config['univariate']:
+            feature_vector = latest_qty.reshape(1, -1)
+        else:
+            # Multivariate: quantity + price lags
+            latest_price = crop_data['price'].values[-lag_days:]
+            feature_vector = np.concatenate([latest_qty, latest_price]).reshape(1, -1)
         
-        # Multivariate models (Beetroot RF, Radish RF, Red Onion LGB)
-        # Order: price_lags, then each weather feature's lags
+        return feature_vector, None
+    
+    def _create_price_features(self, data: pd.DataFrame, crop: str) -> Optional[np.ndarray]:
+        """
+        Create price lag features (consecutive days) matching new.ipynb.
+        Returns feature vector ready for model prediction.
+        """
+        config = self.PRICE_CONFIG[crop]
+        lag_days = config['lag_days']
         
-        # Price lags
-        price_lags = latest_data['price'].values
+        # Filter crop data and sort by date
+        crop_data = data[data['item'] == crop].copy().sort_values('Date')
         
-        # Weather feature lags
-        all_features = [price_lags]
-        for col in weather_cols:
-            if col in latest_data.columns:
-                # Fill missing values with mean
-                col_values = latest_data[col].fillna(latest_data[col].mean()).values
-                all_features.append(col_values)
-            else:
-                # If column missing, use zeros
-                all_features.append(np.zeros(lag_days))
+        if len(crop_data) < lag_days:
+            return None, f"Insufficient data: need {lag_days} days, have {len(crop_data)}"
         
-        # Concatenate: [price_lags, temp_lags, rainfall_lags, humidity_lags, wind_speed_lags, sunshine_lags]
-        feature_vector = np.concatenate(all_features).reshape(1, -1)
+        # Get last lag_days of price data
+        latest_price = crop_data['price'].values[-lag_days:]
+        feature_vector = latest_price.reshape(1, -1)
         
         return feature_vector, None
     
     def predict_demand(self, current_data: pd.DataFrame, crop: str, days_ahead: int = 7) -> Dict:
         """
         Predict future quantity demanded for crop.
-        Matches demand_forecasting.ipynb approach.
         
         Args:
             current_data: DataFrame with columns ['Date', 'item', 'market', 'quantity_tonnes', 'price', ...]
@@ -379,15 +231,14 @@ class SmartFarmingPredictor:
         if error:
             return {'error': error}
         
-        config = self.DEMAND_CONFIG[crop]
-        
-        # Scale features
+        # Scale features using MinMaxScaler
         scaler = MinMaxScaler()
         features_scaled = scaler.fit_transform(feature_vector)
         
-        # Model prediction based on type
+        # Model prediction
+        config = self.DEMAND_CONFIG[crop]
         if config['model_type'] == 'LSTM':
-            # LSTM: Reshape for [samples, timesteps, features]
+            # Reshape for LSTM: [samples, timesteps, features]
             features_scaled = features_scaled.reshape((1, config['lag_days'], 1))
             predicted = self.demand_models[crop].predict(features_scaled, verbose=0)
             predicted_demand = float(predicted[0][0])
@@ -403,23 +254,20 @@ class SmartFarmingPredictor:
             'crop': crop,
             'current_demand': float(current_demand),
             'predicted_demand': predicted_demand,
-            'predicted_quantity': predicted_demand,  # Alias for compatibility
             'demand_change_percent': demand_change_pct,
             'days_ahead': days_ahead,
             'model_type': config['model_type'],
             'lag_days': config['lag_days']
         }
     
-    def predict_price(self, current_data: pd.DataFrame, crop: str, 
-                      days_ahead: int = 7) -> Dict:
+    def predict_price(self, current_data: pd.DataFrame, crop: str, days_ahead: int = 7) -> Dict:
         """
-        Predict future price for crop using per-crop models.
-        Matches 2_model_comparison.ipynb approach.
+        Predict future price for crop.
         
         Args:
             current_data: DataFrame with columns ['Date', 'item', 'price', ...]
             crop: Crop name ('Rice', 'Beetroot', 'Radish', 'Red Onion')
-            days_ahead: Forecast horizon in days
+            days_ahead: Forecast horizon (not used in actual prediction, for reference)
         
         Returns:
             Dict with predicted price or error message
@@ -433,52 +281,36 @@ class SmartFarmingPredictor:
             return {'error': f'No data found for crop {crop}'}
         
         current_price = crop_data['price'].iloc[-1]
-        config = self.PRICE_CONFIG[crop]
         
         # Create features
         feature_vector, error = self._create_price_features(current_data, crop)
         if error:
             return {'error': error}
         
-        try:
-            if config['model_type'] == 'LSTM':
-                # LSTM with scaling - scaler expects shape (n_samples, 1)
-                if crop in self.price_scalers and 'y' in self.price_scalers[crop]:
-                    scaler_y = self.price_scalers[crop]['y']
-                    # Scale each price value individually (reshape to column vector)
-                    prices_column = feature_vector.reshape(-1, 1)  # (60, 1)
-                    features_scaled = scaler_y.transform(prices_column)
-                    # Reshape for LSTM: [1, timesteps, 1]
-                    features_scaled = features_scaled.reshape((1, config['lag_days'], 1))
-                    predicted_scaled = self.price_models[crop].predict(features_scaled, verbose=0)
-                    # Inverse transform
-                    predicted_price = float(scaler_y.inverse_transform(predicted_scaled.reshape(-1, 1))[0][0])
-                else:
-                    # Fallback without scalers - scale each price value
-                    scaler = MinMaxScaler()
-                    prices_column = feature_vector.reshape(-1, 1)
-                    features_scaled = scaler.fit_transform(prices_column)
-                    features_scaled = features_scaled.reshape((1, config['lag_days'], 1))
-                    predicted = self.price_models[crop].predict(features_scaled, verbose=0)
-                    predicted_price = float(predicted[0][0])
-            else:
-                # RandomForest or LightGBM (no scaling needed)
-                predicted = self.price_models[crop].predict(feature_vector)
-                predicted_price = float(predicted[0])
-            
-            # Ensure non-negative price
-            predicted_price = max(0, predicted_price)
-            
-        except Exception as e:
-            return {'error': f'Prediction failed: {str(e)}'}
+        # Scale features
+        scaler = MinMaxScaler()
+        features_scaled = scaler.fit_transform(feature_vector)
+        
+        # Model prediction
+        config = self.PRICE_CONFIG[crop]
+        if config['model_type'] == 'LSTM':
+            # Reshape for LSTM: [samples, timesteps, features]
+            features_scaled = features_scaled.reshape((1, config['lag_days'], 1))
+            predicted = self.price_models[crop].predict(features_scaled, verbose=0)
+            predicted_price = float(predicted[0][0])
+        else:
+            # RandomForest or LightGBM
+            predicted = self.price_models[crop].predict(features_scaled)
+            predicted_price = float(predicted[0])
         
         # Calculate change percentage
         price_change_pct = ((predicted_price - current_price) / current_price * 100) if current_price > 0 else 0
         
         # Calculate Prediction Intervals (95% CI)
+        # Using fixed RMSE approximation: value +/- 1.96 * RMSE
         rmse = self.MODEL_RMSE.get(crop, 20.0)
         margin = 1.96 * rmse
-        lower_bound = max(0, predicted_price - margin)
+        lower_bound = predicted_price - margin
         upper_bound = predicted_price + margin
         
         return {
@@ -649,11 +481,10 @@ class YieldSyncPredictor(SmartFarmingPredictor):
     """
     def __init__(self, model_base_dir: Optional[str] = None):
         # Auto-detect path if not provided
-        # Models are in models/saved_models/ directory (matching notebooks)
         if model_base_dir is None:
-            base_dir = os.path.dirname(os.path.abspath(__file__))  # app/
-            project_root = os.path.dirname(base_dir)  # project root
-            model_base_dir = os.path.join(project_root, 'models', 'saved_models')
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(base_dir)
+            model_base_dir = os.path.join(project_root, 'models')
         super().__init__(model_base_dir=model_base_dir)
 
     def get_recommendation(
@@ -722,7 +553,7 @@ class YieldSyncPredictor(SmartFarmingPredictor):
         )
 
         best_decision = "WAIT"
-        best_profit = 0.0  # Default to 0 instead of -inf
+        best_profit = -float('inf')
         best_horizon = 0
         best_price = current_price
         best_reason = "No profitable opportunity found."
@@ -731,7 +562,7 @@ class YieldSyncPredictor(SmartFarmingPredictor):
         for days, label in zip(horizons, labels):
             try:
                 pred = self.predict_price(df, crop, days)
-                if 'predicted_price' in pred and 'error' not in pred:
+                if 'predicted_price' in pred:
                     p_price = pred['predicted_price']
                     predictions[label] = round(p_price, 2)
                     
@@ -751,7 +582,7 @@ class YieldSyncPredictor(SmartFarmingPredictor):
                         best_horizon = days
                         best_price = p_price
                         
-                        price_change_pct = ((p_price - current_price) / current_price) * 100 if current_price > 0 else 0
+                        price_change_pct = ((p_price - current_price) / current_price) * 100
                         if profit_gain > (revenue_now * 0.05): # 5% gain threshold
                             best_decision = "HOLD" if days < 30 else "STRONG HOLD"
                             best_reason = f"Price expected to rise {price_change_pct:.1f}% in {label}. Net profit +{profit_gain:.0f} LKR."
@@ -761,11 +592,8 @@ class YieldSyncPredictor(SmartFarmingPredictor):
                         else:
                             best_decision = "WAIT"
                             best_reason = "Market stable. No significant advantage to holding."
-                else:
-                    # Prediction failed - use current price as fallback
-                    predictions[label] = round(current_price, 2)
             except Exception as e:
-                predictions[label] = round(current_price, 2)
+                predictions[label] = current_price
         
         # Get Demand Predictions (Optional)
         try:
@@ -780,8 +608,8 @@ class YieldSyncPredictor(SmartFarmingPredictor):
             'decision': best_decision,
             'confidence': 85.0 if best_decision != "WAIT" else 60.0,
             'reasoning': best_reason,
-            'expected_profit_per_kg': (best_profit / quantity_kg) if quantity_kg > 0 and best_profit != float('-inf') else 0,
-            'expected_profit_total': best_profit if best_profit != float('-inf') else 0,
+            'expected_profit_per_kg': (best_profit / quantity_kg) if quantity_kg > 0 else 0,
+            'expected_profit_total': best_profit,
             'best_hold_days': best_horizon,
             'best_time': f"in {best_horizon} days",
             'best_price': best_price,

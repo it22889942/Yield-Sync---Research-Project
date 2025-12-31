@@ -129,9 +129,9 @@ def get_last_entry_date(df):
 # ============================================================================
 @st.cache_resource
 def load_predictor():
-    # Pass path to models dir
-    models_path = os.path.join(PROJECT_ROOT, 'models')
-    return YieldSyncPredictor(model_base_dir=models_path)
+    # Models are in models/saved_models/ directory (matching notebooks)
+    # YieldSyncPredictor will auto-detect the path
+    return YieldSyncPredictor()
 
 try:
     predictor = load_predictor()
@@ -506,34 +506,78 @@ elif mode == '🔄 Retrain Models':
         
         # Retrain button
         if st.button("🚀 Start Retraining", type="primary", use_container_width=True):
-            st.warning("⚠️ Retraining feature requires running the export script manually.")
-            
-            st.markdown("""
-            ### Manual Retraining Steps:
-            
-            1. **Copy the new data** to the main data folder:
-            ```bash
-            copy data\\full_history_features_real_weather.csv data\\model_ready_data.csv
-            ```
-            
-            2. **Run the LSTM export script**:
-            ```bash
-            cd inference_package
-            python export_lstm_models.py
-            ```
-            
-            3. **Copy updated models back**:
-            ```bash
-            copy inference_package\\models\\demand_lstm\\* models\\saved_models\\demand forcasting\\
-            ```
-            
-            4. **Restart the app**:
-            ```bash
-            streamlit run app.py
-            ```
-            """)
-            
-            st.info("💡 Future versions will automate this process!")
+            try:
+                from trainer import retrain_models
+                
+                st.info("🔄 Starting model retraining... This may take 10-20 minutes.")
+                
+                # Create progress indicators
+                status_text = st.empty()
+                results_container = st.container()
+                
+                # Track progress for visual feedback
+                progress_counter = [0]  # Use list to allow modification in nested function
+                
+                # Define callback for progress updates (trainer passes just message string)
+                def progress_callback(message):
+                    progress_counter[0] += 1
+                    status_text.text(f"[{progress_counter[0]}] {message}")
+                
+                # Run retraining
+                status_text.text("🔄 Loading training data...")
+                
+                results = retrain_models(
+                    price_data_path=DATA_PATH,
+                    demand_data_path=DEMAND_DATA_PATH,
+                    save_dir=str(BASE_DIR.parent / 'models' / 'saved_models'),
+                    progress_callback=progress_callback
+                )
+                
+                status_text.text("✅ Retraining complete!")
+                
+                # Display results
+                with results_container:
+                    st.success("🎉 Model retraining completed successfully!")
+                    
+                    # Show demand model results
+                    st.markdown("### 📈 Demand Model Results")
+                    demand_cols = st.columns(4)
+                    for i, (crop, metrics) in enumerate(results.get('demand_models', {}).items()):
+                        with demand_cols[i % 4]:
+                            if 'error' in metrics:
+                                st.error(f"**{crop}**: {metrics['error']}")
+                            else:
+                                st.metric(
+                                    label=crop,
+                                    value=f"MAE: {metrics.get('mae', 'N/A'):.2f}" if isinstance(metrics.get('mae'), (int, float)) else "Trained"
+                                )
+                    
+                    # Show price model results
+                    st.markdown("### 💰 Price Model Results")
+                    price_cols = st.columns(4)
+                    for i, (crop, metrics) in enumerate(results.get('price_models', {}).items()):
+                        with price_cols[i % 4]:
+                            if 'error' in metrics:
+                                st.error(f"**{crop}**: {metrics['error']}")
+                            else:
+                                st.metric(
+                                    label=crop,
+                                    value=f"R²: {metrics.get('r2', 'N/A'):.3f}" if isinstance(metrics.get('r2'), (int, float)) else "Trained"
+                                )
+                    
+                    st.info("💡 Restart the app to use the new models, or they will be loaded on next prediction.")
+                    
+                    # Offer to reload predictor
+                    if st.button("🔄 Reload Models Now"):
+                        st.session_state.pop('predictor', None)
+                        st.rerun()
+                        
+            except ImportError as e:
+                st.error(f"❌ Training module not found: {e}")
+                st.info("Make sure trainer.py is in the app folder.")
+            except Exception as e:
+                st.error(f"❌ Retraining failed: {str(e)}")
+                st.exception(e)
     else:
         st.warning("No data available. Add daily data first before retraining.")
 

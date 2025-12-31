@@ -1,8 +1,22 @@
+# YieldSync - Agricultural Price & Demand Prediction System
+# Required dependencies for app/
+
+# Core Data Processing
 pandas>=1.5.0
 numpy>=1.23.0
-lightgbm>=3.3.0
+
+# Machine Learning
 tensorflow>=2.10.0
+lightgbm>=3.3.0
 scikit-learn>=1.2.0
 joblib>=1.2.0
+
+# Web Application
 streamlit>=1.28.0
+
+# Visualization
 plotly>=5.18.0
+matplotlib>=3.7.0
+
+# Date handling
+python-dateutil>=2.8.0
