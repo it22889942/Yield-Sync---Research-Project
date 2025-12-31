@@ -77,7 +77,7 @@ def load_last_yield():
         with open(LAST_YIELD_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return None
+        return NON
 
 
 @app.route("/", methods=["GET"])
