@@ -48,7 +48,7 @@ def load_artifacts():
     clf_model = joblib.load(clf_path) if os.path.exists(clf_path) else None
     reg_model = joblib.load(reg_path) if os.path.exists(reg_path) else None
 
-   
+    return summary, clf_model, reg_model
 
 
 SUMMARY, CLF_MODEL, REG_MODEL = load_artifacts()
