@@ -18,6 +18,7 @@ warnings.filterwarnings('ignore')
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import matplotlib.pyplot as plt
 
 try:
     from lightgbm import LGBMRegressor
@@ -50,6 +51,7 @@ except ImportError:
 PER_MARKET_MODELS = True
 
 # Multi-horizon forecasting: train separate models for each time horizon
+# Project requirement: predict at multiple horizons
 FORECAST_HORIZONS = [7, 14, 30, 60, 84]  # 1 week, 2 weeks, 1 month, 2 months, 3 months
 
 DEMAND_CONFIG = {
@@ -258,6 +260,35 @@ class ModelTrainer:
         
         self.training_results = {}
     
+    def plot_loss_curve(self, history, crop, market, horizon, model_type):
+        """Plot and save training loss curve"""
+        try:
+            plt.figure(figsize=(10, 6))
+            plt.plot(history.history['loss'], label='Train Loss')
+            if 'val_loss' in history.history:
+                plt.plot(history.history['val_loss'], label='Validation Loss')
+            plt.title(f'Training Loss - {crop} ({market}) {horizon} days ({model_type})')
+            plt.xlabel('Epoch')
+            plt.ylabel('Loss (MSE)')
+            plt.legend()
+            plt.grid(True)
+            
+            # Save to docs/images/training_curves
+            # Assuming self.save_dir is models/saved_models/.. 
+            # We want docs/images/training_curves relative to project root
+            # Easiest is to go up from app/trainer.py
+            # But let's use relative path from cwd
+            save_dir = os.path.join('docs', 'images', 'training_curves')
+            os.makedirs(save_dir, exist_ok=True)
+            
+            market_slug = market.lower().replace(' ', '_') if market else 'all'
+            crop_slug = crop.lower().replace(' ', '_')
+            fname = f'loss_{crop_slug}_{market_slug}_{horizon}day_{model_type}.png'
+            plt.savefig(os.path.join(save_dir, fname))
+            plt.close()
+        except Exception as e:
+            print(f"Error plotting loss: {e}")
+        
     def train_demand_model(self, df: pd.DataFrame, crop: str, horizon: int,
                            progress_callback: Optional[Callable] = None) -> Dict:
         """
@@ -470,6 +501,9 @@ class ModelTrainer:
                      batch_size=config['batch_size'],
                      callbacks=[early_stop],
                      verbose=0)
+            
+            # Plot loss
+            self.plot_loss_curve(history, crop, target_market, horizon, 'LSTM')
             
             y_pred_scaled = model.predict(X_test_lstm, verbose=0).flatten()
             y_pred = scaler_y.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()

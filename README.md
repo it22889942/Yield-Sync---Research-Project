@@ -78,6 +78,35 @@ streamlit run app/app.py
 - 20 demand models (4 crops × 5 horizons)
 - 170 price models (34 crop-market combinations × 5 horizons)
 
+
+---
+
+## 📊 Model Evaluation
+
+### Multi-Horizon Forecasting
+The system predicts prices at **5 different horizons**: 7, 14, 30, 60, and 84 days ahead.
+
+### Accuracy by Forecast Horizon
+
+| Horizon | Description | MAE (LKR) | Use Case |
+|---------|-------------|-----------|----------|
+| **7 days** | 1 week ahead | 39.7 | Short-term decisions |
+| **14 days** | 2 weeks ahead | 50.9 | Planning sales |
+| **30 days** | 1 month ahead | 67.3 | General trends |
+| **60 days** | 2 months ahead | 78.4 | Long-term planning |
+| **84 days** | 3 months ahead | 89.1 | Seasonal patterns |
+
+> **Note**: MAE increases with horizon - this is expected as forecasting further into the future is harder.
+
+### 1-Day Ahead Accuracy (Baseline)
+
+| Crop | Lag Days | Model | MAE (LKR) |
+|------|----------|-------|-----------|
+| Rice | 60 days | LSTM | ~8-12 |
+| Beetroot | 7 days | RandomForest | 19.9 |
+| Radish | 90 days | RandomForest | 8.0 |
+| Red Onion | 45 days | LightGBM | 17.1 |
+
 ---
 
 ##  Project Structure
