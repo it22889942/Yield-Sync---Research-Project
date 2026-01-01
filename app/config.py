@@ -33,7 +33,9 @@ CROP_NAMES_SI = {
 DEFAULT_WEATHER = {
     'temperature_avg_C': 27.5,
     'rainfall_mm': 5.0,
-    'humidity_percent': 75.0
+    'humidity_percent': 75.0,
+    'wind_speed': 13.5,
+    'sunshine_hours': 10.5
 }
 
 # UI Translations

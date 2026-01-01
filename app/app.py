@@ -232,15 +232,19 @@ if mode == '📝 Add Daily Data':
         known_markets = sorted(df['market'].dropna().unique().tolist()) if not df.empty else ['Colombo', 'Dambulla', 'Kandy']
         market = st.selectbox("Market", options=known_markets)
         
-        # Weather data (optional)
-        with st.expander("🌤️ Weather Data (Defaults Loaded)"):
-            weather_cols = st.columns(3)
-            with weather_cols[0]:
-                temperature = st.number_input("Temperature (°C)", value=float(DEFAULT_WEATHER['temperature_avg_C']), step=0.5)
-            with weather_cols[1]:
-                rainfall = st.number_input("Rainfall (mm)", value=float(DEFAULT_WEATHER['rainfall_mm']), step=0.5)
-            with weather_cols[2]:
-                humidity = st.number_input("Humidity (%)", value=float(DEFAULT_WEATHER['humidity_percent']), step=1.0)
+        # Weather data (REQUIRED for predictions)
+        st.markdown("### 🌤️ Weather Data (Required)")
+        weather_cols = st.columns(5)
+        with weather_cols[0]:
+            temperature = st.number_input("Temperature (°C)", value=float(DEFAULT_WEATHER['temperature_avg_C']), step=0.5)
+        with weather_cols[1]:
+            rainfall = st.number_input("Rainfall (mm)", value=float(DEFAULT_WEATHER['rainfall_mm']), step=0.5)
+        with weather_cols[2]:
+            humidity = st.number_input("Humidity (%)", value=float(DEFAULT_WEATHER['humidity_percent']), step=1.0)
+        with weather_cols[3]:
+            wind_speed = st.number_input("Wind Speed (km/h)", value=float(DEFAULT_WEATHER['wind_speed']), step=0.5)
+        with weather_cols[4]:
+            sunshine_hours = st.number_input("Sunshine (hours)", value=float(DEFAULT_WEATHER['sunshine_hours']), step=0.5)
         
         # Crop data entry
         st.subheader("Enter Price and Volume for Each Crop")
@@ -299,9 +303,11 @@ if mode == '📝 Add Daily Data':
                     'item': crop,
                     'price': data['price'],
                     'volume_MT': data['volume'], # Map volume to volume_MT
-                    'temperature_avg_C': temperature,
-                    'rainfall_mm': rainfall,
-                    'humidity_percent': humidity,
+                    'temp': temperature,
+                    'rainfall': rainfall,
+                    'humidity': humidity,
+                    'wind_speed': wind_speed,
+                    'sunshine_hours': sunshine_hours,
                     'is_public_holiday': 0, # Default
                     'demand_multiplier': 1.0, # Default
                     # Add quantity_tonnes if your model needs it explicitly
@@ -364,9 +370,11 @@ if mode == '📝 Add Daily Data':
                             'market': 'Colombo',
                             'volume_MT': 10.0,
                             'quantity_tonnes': 10.0,
-                            'temperature_avg_C': DEFAULT_WEATHER['temperature_avg_C'],
-                            'rainfall_mm': DEFAULT_WEATHER['rainfall_mm'],
-                            'humidity_percent': DEFAULT_WEATHER['humidity_percent'],
+                            'temp': DEFAULT_WEATHER['temperature_avg_C'],
+                            'rainfall': DEFAULT_WEATHER['rainfall_mm'],
+                            'humidity': DEFAULT_WEATHER['humidity_percent'],
+                            'wind_speed': DEFAULT_WEATHER['wind_speed'],
+                            'sunshine_hours': DEFAULT_WEATHER['sunshine_hours'],
                             'is_public_holiday': 0, 'demand_multiplier': 1.0
                         }
                         for col, val in defaults.items():
