@@ -28,6 +28,15 @@ try:
 except ImportError:
     TENSORFLOW_AVAILABLE = False
 
+# Import crop-market mapping for per-market model support
+try:
+    from config import CROP_MARKETS
+    HAS_CROP_MARKETS = True
+except ImportError:
+    CROP_MARKETS = None
+    HAS_CROP_MARKETS = False
+
+
 
 class SmartFarmingPredictor:
     """
@@ -134,6 +143,12 @@ class SmartFarmingPredictor:
         self.price_scalers = {}   # Scalers for LSTM: {crop: {horizon: scaler}}
         self.price_configs = {}   # Config for each price model: {crop: {horizon: config}}
         
+        # Per-market models: {crop: {market: {horizon: model}}}
+        self.price_models_per_market = {}
+        self.price_scalers_per_market = {}
+        self.price_configs_per_market = {}
+        self.has_per_market_models = False
+        
         self._load_all_models()
     
     def _load_all_models(self):
@@ -188,6 +203,67 @@ class SmartFarmingPredictor:
         
         price_dir = os.path.join(self.model_base_dir, 'price forcasting')
         
+        # First try to load per-market models
+        per_market_count = 0
+        if HAS_CROP_MARKETS and CROP_MARKETS:
+            for crop, markets in CROP_MARKETS.items():
+                self.price_models_per_market[crop] = {}
+                self.price_scalers_per_market[crop] = {}
+                self.price_configs_per_market[crop] = {}
+                
+                config = self.PRICE_CONFIG.get(crop)
+                if not config:
+                    continue
+                    
+                crop_slug = crop.lower().replace(' ', '_')
+                
+                for market in markets:
+                    market_slug = market.lower().replace(' ', '_')
+                    self.price_models_per_market[crop][market] = {}
+                    self.price_scalers_per_market[crop][market] = {}
+                    self.price_configs_per_market[crop][market] = {}
+                    
+                    for horizon in self.FORECAST_HORIZONS:
+                        try:
+                            # Per-market filenames include market slug
+                            if config['model_type'] == 'LSTM':
+                                model_file = f'{crop_slug}_{market_slug}_{horizon}day_lstm.h5'
+                                scalers_file = f'{crop_slug}_{market_slug}_{horizon}day_lstm_scalers.joblib'
+                            elif config['model_type'] == 'RandomForest':
+                                model_file = f'{crop_slug}_{market_slug}_{horizon}day_rf.joblib'
+                                scalers_file = None
+                            elif config['model_type'] == 'LightGBM':
+                                model_file = f'{crop_slug}_{market_slug}_{horizon}day_lgbm.joblib'
+                                scalers_file = None
+                            else:
+                                continue
+                            
+                            config_file = f'{crop_slug}_{market_slug}_{horizon}day_config.joblib'
+                            model_path = os.path.join(price_dir, model_file)
+                            
+                            if os.path.exists(model_path):
+                                if config['model_type'] == 'LSTM':
+                                    self.price_models_per_market[crop][market][horizon] = load_model(model_path, compile=False)
+                                    if scalers_file:
+                                        scalers_path = os.path.join(price_dir, scalers_file)
+                                        if os.path.exists(scalers_path):
+                                            self.price_scalers_per_market[crop][market][horizon] = joblib.load(scalers_path)
+                                else:
+                                    self.price_models_per_market[crop][market][horizon] = joblib.load(model_path)
+                                
+                                config_path = os.path.join(price_dir, config_file)
+                                if os.path.exists(config_path):
+                                    self.price_configs_per_market[crop][market][horizon] = joblib.load(config_path)
+                                
+                                per_market_count += 1
+                        except Exception as e:
+                            pass  # Silent fail for per-market, will fallback to generic
+            
+            if per_market_count > 0:
+                self.has_per_market_models = True
+                print(f"✓ Per-market models: {per_market_count} loaded")
+        
+        # Also load generic (fallback) price models
         for crop, config in self.PRICE_CONFIG.items():
             self.price_models[crop] = {}
             self.price_scalers[crop] = {}
@@ -198,7 +274,7 @@ class SmartFarmingPredictor:
             
             for horizon in self.FORECAST_HORIZONS:
                 try:
-                    # Construct filename based on model type
+                    # Construct filename based on model type (generic, no market)
                     if config['model_type'] == 'LSTM':
                         model_file = f'{crop_slug}_{horizon}day_lstm.h5'
                         scalers_file = f'{crop_slug}_{horizon}day_lstm_scalers.joblib'
@@ -236,16 +312,20 @@ class SmartFarmingPredictor:
                     print(f"  ✗ {crop} {horizon}day - Error: {str(e)[:40]}")
             
             if loaded_count > 0:
-                print(f"✓ {crop:12} ({config['model_type']:12}) - {loaded_count}/5 horizons")
+                print(f"✓ {crop:12} ({config['model_type']:12}) - {loaded_count}/5 horizons (fallback)")
             else:
-                print(f"✗ {crop:12} - No models found")
+                if not self.has_per_market_models:
+                    print(f"✗ {crop:12} - No models found")
         
         print("\n" + "="*60)
         print("MODEL LOADING COMPLETE")
         total_demand = sum(len(models) for models in self.demand_models.values())
         total_price = sum(len(models) for models in self.price_models.values())
         print(f"Demand models loaded: {total_demand}/20 (4 crops × 5 horizons)")
-        print(f"Price models loaded: {total_price}/20 (4 crops × 5 horizons)")
+        if self.has_per_market_models:
+            print(f"Price models loaded: {per_market_count} per-market models")
+        else:
+            print(f"Price models loaded: {total_price}/20 (4 crops × 5 horizons)")
         print("="*60 + "\n")
     
     def _add_temporal_features(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -476,26 +556,48 @@ class SmartFarmingPredictor:
         return closest_horizon
     
     def predict_price(self, current_data: pd.DataFrame, crop: str, 
-                      days_ahead: int = 7) -> Dict:
+                      days_ahead: int = 7, market: str = None) -> Dict:
         """
         Predict future price for crop using multi-horizon models.
+        Supports per-market models when available.
         
         Args:
             current_data: DataFrame with columns ['Date', 'item', 'price', ...]
             crop: Crop name ('Rice', 'Beetroot', 'Radish', 'Red Onion')
             days_ahead: Forecast horizon in days
+            market: Optional market name for per-market prediction
         
         Returns:
             Dict with predicted price or error message
         """
-        if crop not in self.price_models:
-            return {'error': f'Price model for {crop} not loaded'}
-        
         # Select appropriate horizon model
         horizon = self._select_horizon(days_ahead)
         
-        if horizon not in self.price_models[crop]:
-            return {'error': f'No {horizon}-day model available for {crop}'}
+        # Try per-market model first if market provided
+        model = None
+        scalers = None
+        using_per_market = False
+        
+        if market and self.has_per_market_models:
+            if (crop in self.price_models_per_market and 
+                market in self.price_models_per_market[crop] and
+                horizon in self.price_models_per_market[crop][market]):
+                model = self.price_models_per_market[crop][market][horizon]
+                if (crop in self.price_scalers_per_market and 
+                    market in self.price_scalers_per_market[crop] and
+                    horizon in self.price_scalers_per_market[crop][market]):
+                    scalers = self.price_scalers_per_market[crop][market][horizon]
+                using_per_market = True
+        
+        # Fallback to generic crop model
+        if model is None:
+            if crop not in self.price_models:
+                return {'error': f'Price model for {crop} not loaded'}
+            if horizon not in self.price_models[crop]:
+                return {'error': f'No {horizon}-day model available for {crop}'}
+            model = self.price_models[crop][horizon]
+            if crop in self.price_scalers and horizon in self.price_scalers[crop]:
+                scalers = self.price_scalers[crop][horizon]
         
         # Get crop data and validate
         crop_data = current_data[current_data['item'] == crop].copy().sort_values('Date')
@@ -504,7 +606,6 @@ class SmartFarmingPredictor:
         
         current_price = crop_data['price'].iloc[-1]
         config = self.PRICE_CONFIG[crop]
-        model = self.price_models[crop][horizon]
         
         # Create features
         feature_vector, error = self._create_price_features(current_data, crop)
@@ -514,8 +615,7 @@ class SmartFarmingPredictor:
         try:
             if config['model_type'] == 'LSTM':
                 # LSTM with scaling
-                if crop in self.price_scalers and horizon in self.price_scalers[crop]:
-                    scalers = self.price_scalers[crop][horizon]
+                if scalers and 'y' in scalers:
                     scaler_y = scalers['y']
                     # Scale each price value individually (reshape to column vector)
                     prices_column = feature_vector.reshape(-1, 1)  # (60, 1)
@@ -617,7 +717,7 @@ class SmartFarmingPredictor:
         PROFIT_HOLD_THRESHOLD = 2.0   # If we make >2% more by waiting -> HOLD
         LOSS_SELL_THRESHOLD = -2.0    # If we lose >2% by waiting -> SELL
         
-        recommendation = "WAIT"
+        recommendation = "NEUTRAL"
         reasoning_parts = []
         
         if profit_delta_pct >= PROFIT_HOLD_THRESHOLD:
@@ -637,9 +737,9 @@ class SmartFarmingPredictor:
             reasoning_parts.append(f"Sell now to avoid loss: {profit_delta_pct:.1f}% if held")
             
         else:
-            # Neutral / Risks outweigh small gains
-            recommendation = "WAIT"
-            reasoning_parts.append(f"Marginal gain/loss: {profit_delta_pct:+.1f}%")
+            # Neutral / Price stable
+            recommendation = "NEUTRAL"
+            reasoning_parts.append(f"Price stable ({profit_delta_pct:+.1f}%), sell when convenient")
 
         # --- 3. Demand Context ---
         if abs(demand_change_pct) > 2.0:

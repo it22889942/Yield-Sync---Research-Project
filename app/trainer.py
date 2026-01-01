@@ -40,6 +40,15 @@ except ImportError:
 # CONFIGURATION (Matching Notebooks + Multi-Horizon)
 # =============================================================================
 
+# Import crop-market mapping
+try:
+    from config import CROP_MARKETS
+except ImportError:
+    CROP_MARKETS = None
+
+# Enable per-market model training (train separate model for each crop-market combination)
+PER_MARKET_MODELS = True
+
 # Multi-horizon forecasting: train separate models for each time horizon
 FORECAST_HORIZONS = [7, 14, 30, 60, 84]  # 1 week, 2 weeks, 1 month, 2 months, 3 months
 
@@ -383,14 +392,15 @@ class ModelTrainer:
         return result
     
     def train_price_model(self, df: pd.DataFrame, crop: str, horizon: int,
-                          progress_callback: Optional[Callable] = None) -> Dict:
+                          market: str = None, progress_callback: Optional[Callable] = None) -> Dict:
         """
-        Train price model for a specific crop and horizon.
+        Train price model for a specific crop, horizon, and optionally market.
         
         Args:
             df: DataFrame with price data
             crop: Crop name
             horizon: Days ahead to predict (7, 14, 30, 60, 84)
+            market: Optional market name. If None, uses top market for crop.
             progress_callback: Optional callback for progress updates
         
         Returns:
@@ -400,15 +410,25 @@ class ModelTrainer:
         lag_days = config['lag_days']
         include_weather = not config['univariate']
         
-        if progress_callback:
-            progress_callback(f"Training {crop} price model for {horizon}-day horizon...")
-        
-        # Get top market for this crop
+        # Get market data
         crop_df = df[df['item'] == crop]
         if len(crop_df) == 0:
             return {'error': f'No data for {crop}'}
-        top_market = crop_df['market'].value_counts().idxmax()
-        market_df = crop_df[crop_df['market'] == top_market].copy()
+        
+        if market:
+            # Per-market training: use specified market
+            target_market = market
+            market_df = crop_df[crop_df['market'] == market].copy()
+            if len(market_df) == 0:
+                return {'error': f'No data for {crop} in {market}'}
+        else:
+            # Fallback: use top market for this crop
+            target_market = crop_df['market'].value_counts().idxmax()
+            market_df = crop_df[crop_df['market'] == target_market].copy()
+        
+        if progress_callback:
+            market_label = f" ({market})" if market else ""
+            progress_callback(f"Training {crop}{market_label} price model for {horizon}-day horizon...")
         
         # Create features with target horizon
         X, y, series_df = create_price_features(market_df, crop, lag_days, horizon, include_weather)
@@ -454,20 +474,23 @@ class ModelTrainer:
             y_pred_scaled = model.predict(X_test_lstm, verbose=0).flatten()
             y_pred = scaler_y.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
             
-            # Save model and scalers with horizon
+            # Save model and scalers with horizon (include market in filename if per-market)
             crop_slug = crop.lower().replace(' ', '_')
-            model_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_lstm.h5')
+            market_slug = target_market.lower().replace(' ', '_') if market else ''
+            name_suffix = f'_{market_slug}' if market else ''
+            
+            model_path = os.path.join(self.price_dir, f'{crop_slug}{name_suffix}_{horizon}day_lstm.h5')
             model.save(model_path)
             
-            scalers_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_lstm_scalers.joblib')
+            scalers_path = os.path.join(self.price_dir, f'{crop_slug}{name_suffix}_{horizon}day_lstm_scalers.joblib')
             joblib.dump({'y': scaler_y}, scalers_path)
             
-            config_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_config.joblib')
+            config_path = os.path.join(self.price_dir, f'{crop_slug}{name_suffix}_{horizon}day_config.joblib')
             joblib.dump({
                 'model': 'LSTM',
                 'horizon': horizon,
                 'lag': lag_days,
-                'market': top_market,
+                'market': target_market,
                 'features': []
             }, config_path)
             
@@ -480,17 +503,20 @@ class ModelTrainer:
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
             
-            # Save model with horizon
+            # Save model with horizon (include market in filename if per-market)
             crop_slug = crop.lower().replace(' ', '_')
-            model_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_rf.joblib')
+            market_slug = target_market.lower().replace(' ', '_') if market else ''
+            name_suffix = f'_{market_slug}' if market else ''
+            
+            model_path = os.path.join(self.price_dir, f'{crop_slug}{name_suffix}_{horizon}day_rf.joblib')
             joblib.dump(model, model_path)
             
-            config_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_config.joblib')
+            config_path = os.path.join(self.price_dir, f'{crop_slug}{name_suffix}_{horizon}day_config.joblib')
             joblib.dump({
                 'model': 'Random Forest',
                 'horizon': horizon,
                 'lag': lag_days,
-                'market': top_market,
+                'market': target_market,
                 'features': WEATHER_FEATURES if include_weather else []
             }, config_path)
             
@@ -503,17 +529,20 @@ class ModelTrainer:
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
             
-            # Save model with horizon
+            # Save model with horizon (include market in filename if per-market)
             crop_slug = crop.lower().replace(' ', '_')
-            model_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_lgbm.joblib')
+            market_slug = target_market.lower().replace(' ', '_') if market else ''
+            name_suffix = f'_{market_slug}' if market else ''
+            
+            model_path = os.path.join(self.price_dir, f'{crop_slug}{name_suffix}_{horizon}day_lgbm.joblib')
             joblib.dump(model, model_path)
             
-            config_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_config.joblib')
+            config_path = os.path.join(self.price_dir, f'{crop_slug}{name_suffix}_{horizon}day_config.joblib')
             joblib.dump({
                 'model': 'LightGBM',
                 'horizon': horizon,
                 'lag': lag_days,
-                'market': top_market,
+                'market': target_market,
                 'features': WEATHER_FEATURES if include_weather else []
             }, config_path)
         else:
@@ -529,7 +558,7 @@ class ModelTrainer:
             'horizon': horizon,
             'model_type': config['model_type'],
             'lag_days': lag_days,
-            'market': top_market,
+            'market': target_market,
             'train_samples': len(X_train),
             'test_samples': len(X_test),
             'mae': mae,
@@ -538,8 +567,9 @@ class ModelTrainer:
             'model_path': model_path
         }
         
+        market_label = f" ({target_market})" if market else ""
         if progress_callback:
-            progress_callback(f"✓ {crop} {horizon}-day price model trained (MAE: {mae:.2f})")
+            progress_callback(f"✓ {crop}{market_label} {horizon}-day price model trained (MAE: {mae:.2f})")
         
         return result
     
@@ -560,12 +590,13 @@ class ModelTrainer:
             'demand_models': {},
             'price_models': {},
             'timestamp': datetime.now().isoformat(),
-            'success': True
+            'success': True,
+            'per_market': PER_MARKET_MODELS
         }
         
         crops = ['Rice', 'Beetroot', 'Radish', 'Red Onion']
         
-        # Train demand models for all horizons
+        # Train demand models for all horizons (crop-level, not per-market)
         if progress_callback:
             progress_callback("="*50)
             progress_callback(f"TRAINING DEMAND MODELS ({len(crops)} crops × {len(FORECAST_HORIZONS)} horizons)")
@@ -583,24 +614,50 @@ class ModelTrainer:
                     results['demand_models'][crop][f'{horizon}day'] = {'error': str(e)}
                     results['success'] = False
         
-        # Train price models for all horizons
-        if progress_callback:
-            progress_callback("")
-            progress_callback("="*50)
-            progress_callback(f"TRAINING PRICE MODELS ({len(crops)} crops × {len(FORECAST_HORIZONS)} horizons)")
-            progress_callback("="*50)
-        
-        for crop in crops:
-            results['price_models'][crop] = {}
-            for horizon in FORECAST_HORIZONS:
-                try:
-                    result = self.train_price_model(price_df, crop, horizon, progress_callback)
-                    results['price_models'][crop][f'{horizon}day'] = result
-                    if 'error' in result:
+        # Train price models - either per-market or single per crop
+        if PER_MARKET_MODELS and CROP_MARKETS:
+            # Per-market training: loop through each crop-market combination
+            total_models = sum(len(markets) for markets in CROP_MARKETS.values()) * len(FORECAST_HORIZONS)
+            if progress_callback:
+                progress_callback("")
+                progress_callback("="*50)
+                progress_callback(f"TRAINING PRICE MODELS PER MARKET ({total_models} models)")
+                progress_callback("="*50)
+            
+            for crop in crops:
+                results['price_models'][crop] = {}
+                crop_markets = CROP_MARKETS.get(crop, [])
+                
+                for market in crop_markets:
+                    results['price_models'][crop][market] = {}
+                    for horizon in FORECAST_HORIZONS:
+                        try:
+                            result = self.train_price_model(price_df, crop, horizon, market, progress_callback)
+                            results['price_models'][crop][market][f'{horizon}day'] = result
+                            if 'error' in result:
+                                results['success'] = False
+                        except Exception as e:
+                            results['price_models'][crop][market][f'{horizon}day'] = {'error': str(e)}
+                            results['success'] = False
+        else:
+            # Original behavior: one model per crop (top market)
+            if progress_callback:
+                progress_callback("")
+                progress_callback("="*50)
+                progress_callback(f"TRAINING PRICE MODELS ({len(crops)} crops × {len(FORECAST_HORIZONS)} horizons)")
+                progress_callback("="*50)
+            
+            for crop in crops:
+                results['price_models'][crop] = {}
+                for horizon in FORECAST_HORIZONS:
+                    try:
+                        result = self.train_price_model(price_df, crop, horizon, None, progress_callback)
+                        results['price_models'][crop][f'{horizon}day'] = result
+                        if 'error' in result:
+                            results['success'] = False
+                    except Exception as e:
+                        results['price_models'][crop][f'{horizon}day'] = {'error': str(e)}
                         results['success'] = False
-                except Exception as e:
-                    results['price_models'][crop][f'{horizon}day'] = {'error': str(e)}
-                    results['success'] = False
         
         if progress_callback:
             progress_callback("")
