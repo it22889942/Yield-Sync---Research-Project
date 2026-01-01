@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from predictor import YieldSyncPredictor
 from config import (
     TARGET_CROPS, HORIZONS, PERISHABILITY,
-    CROP_NAMES_SI, TRANSLATIONS, DEFAULT_WEATHER
+    CROP_NAMES_SI, TRANSLATIONS, DEFAULT_WEATHER, CROP_MARKETS
 )
 
 # ============================================================================
@@ -227,13 +227,28 @@ if mode == '📝 Add Daily Data':
         entry_date = next_date
         st.markdown(f"### 📆 Adding data for: **{entry_date.strftime('%Y-%m-%d')}**")
         
-        # Market selector
-        # We should ideally show markets present in data, but default to major list
-        known_markets = sorted(df['market'].dropna().unique().tolist()) if not df.empty else ['Colombo', 'Dambulla', 'Kandy']
-        market = st.selectbox("Market", options=known_markets)
+        # Step 1: Select Crop FIRST
+        st.markdown("### 🌾 Step 1: Select Crop")
+        selected_crop = st.selectbox(
+            "Crop",
+            options=TARGET_CROPS,
+            format_func=lambda x: f"{x} / {CROP_NAMES_SI.get(x, x)}",
+            key="manual_crop"
+        )
+        
+        # Step 2: Show only markets valid for selected crop
+        st.markdown("### 📍 Step 2: Select Market")
+        st.info(f"Showing {len(CROP_MARKETS[selected_crop])} markets available for **{selected_crop}**")
+        
+        crop_valid_markets = sorted(CROP_MARKETS[selected_crop])
+        market = st.selectbox(
+            "Market",
+            options=crop_valid_markets,
+            key="manual_market"
+        )
         
         # Weather data (REQUIRED for predictions)
-        st.markdown("### 🌤️ Weather Data (Required)")
+        st.markdown("### 🌤️ Step 3: Weather Data (Required)")
         weather_cols = st.columns(5)
         with weather_cols[0]:
             temperature = st.number_input("Temperature (°C)", value=float(DEFAULT_WEATHER['temperature_avg_C']), step=0.5)
@@ -246,53 +261,49 @@ if mode == '📝 Add Daily Data':
         with weather_cols[4]:
             sunshine_hours = st.number_input("Sunshine (hours)", value=float(DEFAULT_WEATHER['sunshine_hours']), step=0.5)
         
-        # Crop data entry
-        st.subheader("Enter Price and Volume for Each Crop")
+        # Step 4: Price and Volume entry for selected crop
+        st.markdown(f"### 💰 Step 4: Enter Price and Volume for {selected_crop}")
         
-        # Get last known prices for reference
-        last_prices = {}
+        # Get last known price for reference
+        last_price = None
         if not df.empty:
-            for crop in TARGET_CROPS:
-                # Get last price for this market specifically if possible
-                crop_df = df[(df['item'] == crop) & (df['market'] == market)].sort_values('Date')
-                if not crop_df.empty:
-                    last_prices[crop] = crop_df.iloc[-1]['price']
-                else:
-                    # Fallback to any market
-                    crop_df_any = df[df['item'] == crop].sort_values('Date')
-                    if not crop_df_any.empty:
-                        last_prices[crop] = crop_df_any.iloc[-1]['price']
+            # Get last price for this market specifically if possible
+            crop_df = df[(df['item'] == selected_crop) & (df['market'] == market)].sort_values('Date')
+            if not crop_df.empty:
+                last_price = crop_df.iloc[-1]['price']
+            else:
+                # Fallback to any market
+                crop_df_any = df[df['item'] == selected_crop].sort_values('Date')
+                if not crop_df_any.empty:
+                    last_price = crop_df_any.iloc[-1]['price']
         
-        crop_data = {}
-        for crop in TARGET_CROPS:
-            with st.container():
-                st.markdown(f"### 🌾 {crop} / {CROP_NAMES_SI.get(crop, crop)}")
-                
-                default_price = last_prices.get(crop, 100.0)
-                cols = st.columns(3)
-                with cols[0]:
-                    price = st.number_input(
-                        f"Price (LKR/kg)",
-                        min_value=0.0, max_value=5000.0, value=float(default_price), step=1.0,
-                        key=f"price_{crop}"
-                    )
-                with cols[1]:
-                    volume = st.number_input(
-                        f"Volume (MT)",
-                        min_value=0.0, max_value=2000.0, value=10.0, step=0.1,
-                        key=f"volume_{crop}"
-                    )
-                with cols[2]:
-                    if crop in last_prices:
-                        change = ((price - last_prices[crop]) / last_prices[crop]) * 100
-                        st.metric("vs Last Entry", f"{change:+.1f}%")
-                    else:
-                        st.write("")
-                
-                crop_data[crop] = {'price': price, 'volume': volume}
+        default_price = last_price if last_price else 100.0
+        
+        cols = st.columns(3)
+        with cols[0]:
+            price = st.number_input(
+                f"Price (LKR/kg)",
+                min_value=0.0, max_value=5000.0, value=float(default_price), step=1.0,
+                key=f"price_{selected_crop}_{market}"
+            )
+        with cols[1]:
+            volume = st.number_input(
+                f"Volume (MT)",
+                min_value=0.0, max_value=2000.0, value=10.0, step=0.1,
+                key=f"volume_{selected_crop}_{market}"
+            )
+        with cols[2]:
+            if last_price:
+                change = ((price - last_price) / last_price) * 100
+                st.metric("vs Last Entry", f"{change:+.1f}%")
+            else:
+                st.write("")
+        
+        crop_data = {selected_crop: {'price': price, 'volume': volume}}
         
         st.markdown("---")
         
+
         # Save button
         if st.button(f"💾 Save Data for {entry_date.strftime('%Y-%m-%d')}", type="primary", use_container_width=True):
             new_rows = []
@@ -430,8 +441,13 @@ elif mode == '📈 View Data':
             with col1:
                 selected_crop = st.selectbox("Crop", options=['All'] + TARGET_CROPS, key="view_crop")
             with col2:
-                markets = ['All'] + sorted(list(df['market'].unique()))
-                selected_market = st.selectbox("Market", options=markets, key="view_market")
+                # Show crop-specific markets when a crop is selected
+                if selected_crop != 'All':
+                    valid_markets = ['All'] + sorted(CROP_MARKETS.get(selected_crop, []))
+                else:
+                    valid_markets = ['All'] + sorted(list(df['market'].unique()))
+                selected_market = st.selectbox("Market", options=valid_markets, key="view_market")
+
             
             # Filter data
             filtered_df = df.copy()
@@ -774,9 +790,9 @@ else:
             format_func=lambda x: f"{x} / {CROP_NAMES_SI.get(x, x)}" if language == 'si' else x
         )
         
-        # Market
-        markets = sorted(list(df['market'].dropna().unique()))
-        market = st.selectbox(lang['market'], options=markets)
+        # Market - Show only markets valid for selected crop
+        crop_markets = sorted(CROP_MARKETS.get(crop, []))
+        market = st.selectbox(lang['market'], options=crop_markets)
         
         # Quantity
         quantity_kg = st.number_input(lang['quantity'], min_value=1, max_value=10000, value=100, step=10)

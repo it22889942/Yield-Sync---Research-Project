@@ -22,6 +22,56 @@ PERISHABILITY = {
     'Red Onion': 30
 }
 
+# Crop-Market Mapping: Only these markets are valid for each crop
+CROP_MARKETS = {
+    'Rice': [
+        'Colombo',
+        'Anuradhapura',
+        'Moneragala',
+        'Dambulla',
+        'Ampara',
+        'Kandy',
+        'Kurunegala',
+        'Polonnaruwa'
+    ],
+    'Beetroot': [
+        'Colombo',
+        'Thambuththegama',
+        'Bandarawela',
+        'Dambulla',
+        'Kandy',
+        'Nuwara Eliya'  # Standardized spelling
+    ],
+    'Radish': [
+        'Colombo',
+        'Moneragala',
+        'Dambulla',
+        'Kandy',
+        'Meegoda'
+    ],
+    'Red Onion': [
+        'Colombo',
+        'Puttalam',
+        'Mullaittivu',  # Standardized from Mulathiv
+        'Vavuniya',
+        'Batticaloa',
+        'Dambulla',
+        'Embilipitiya',
+        'Jaffna',
+        'Kandy',
+        'Mannar',
+        'Meegoda',
+        'Moneragala',
+        'Nuwara Eliya',  # Standardized spelling
+        'Thambuththegama',
+        'Trincomalee'
+    ]
+}
+
+# Get all unique markets across all crops
+ALL_MARKETS = sorted(set(m for markets in CROP_MARKETS.values() for m in markets))
+
+
 # Sinhala Translations for Crop Names
 CROP_NAMES_SI = {
     'Rice': 'සහල්',
