@@ -179,7 +179,7 @@ df = load_data()
 # MODE: ADD DAILY DATA
 # ============================================================================
 if mode == '📝 Add Daily Data':
-    st.subheader("📝 Add New Daily Market Data")
+    st.subheader(" Add New Daily Market Data")
     
     # Get the next date to add
     next_date = get_next_entry_date(df)
