@@ -158,7 +158,7 @@ with st.sidebar:
     # Mode selection
     mode = st.radio(
         "Mode",
-        options=['📊 Get Prediction', '📝 Add Daily Data', '📈 View Data', '🔄 Retrain Models'],
+        options=['📊 Get Prediction', '📝 Add Daily Data', '📈 View Data', '🔄 Retrain Models', '⚙️ Settings'],
         index=0
     )
     
@@ -407,66 +407,138 @@ elif mode == '📈 View Data':
     if df.empty:
         st.warning("No data available. Add some daily data first!")
     else:
-        # Stats
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Records", len(df))
-        with col2:
-            st.metric("Days of Data", len(df['Date'].unique()))
-        with col3:
-            st.metric("First Date", df['Date'].min().strftime('%Y-%m-%d'))
-        with col4:
-            st.metric("Last Date", df['Date'].max().strftime('%Y-%m-%d'))
+        # Tabs for different views
+        view_tab1, view_tab2 = st.tabs(["📊 Historical Trends", "🔄 Market Comparison"])
         
-        st.markdown("---")
-        
-        # Filters
-        col1, col2 = st.columns(2)
-        with col1:
-            selected_crop = st.selectbox("Crop", options=['All'] + TARGET_CROPS)
-        with col2:
-            markets = ['All'] + sorted(list(df['market'].unique()))
-            selected_market = st.selectbox("Market", options=markets)
-        
-        # Filter data
-        filtered_df = df.copy()
-        if selected_crop != 'All':
-            filtered_df = filtered_df[filtered_df['item'] == selected_crop]
-        if selected_market != 'All':
-            filtered_df = filtered_df[filtered_df['market'] == selected_market]
-        
-        # Chart
-        if not filtered_df.empty:
-            # Aggregate to avoid plotting issues
-            chart_df = filtered_df.groupby(['Date', 'item']).agg({'price': 'mean', 'volume_MT': 'mean'}).reset_index()
+        # TAB 1: Historical Trends
+        with view_tab1:
+            # Stats
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Records", len(df))
+            with col2:
+                st.metric("Days of Data", len(df['Date'].unique()))
+            with col3:
+                st.metric("First Date", df['Date'].min().strftime('%Y-%m-%d'))
+            with col4:
+                st.metric("Last Date", df['Date'].max().strftime('%Y-%m-%d'))
             
-            fig = go.Figure()
-            for crop in chart_df['item'].unique():
-                crop_df = chart_df[chart_df['item'] == crop]
-                fig.add_trace(go.Scatter(
-                    x=crop_df['Date'],
-                    y=crop_df['price'],
-                    mode='lines+markers',
-                    name=crop
-                ))
+            st.markdown("---")
             
-            fig.update_layout(
-                title=f"Price Trends ({selected_market})",
-                xaxis_title="Date",
-                yaxis_title="Price (LKR/kg)",
-                template='plotly_white',
-                height=400,
-                hovermode='x unified'
+            # Filters
+            col1, col2 = st.columns(2)
+            with col1:
+                selected_crop = st.selectbox("Crop", options=['All'] + TARGET_CROPS, key="view_crop")
+            with col2:
+                markets = ['All'] + sorted(list(df['market'].unique()))
+                selected_market = st.selectbox("Market", options=markets, key="view_market")
+            
+            # Filter data
+            filtered_df = df.copy()
+            if selected_crop != 'All':
+                filtered_df = filtered_df[filtered_df['item'] == selected_crop]
+            if selected_market != 'All':
+                filtered_df = filtered_df[filtered_df['market'] == selected_market]
+            
+            # Chart
+            if not filtered_df.empty:
+                # Aggregate to avoid plotting issues
+                chart_df = filtered_df.groupby(['Date', 'item']).agg({'price': 'mean', 'volume_MT': 'mean'}).reset_index()
+                
+                fig = go.Figure()
+                for crop in chart_df['item'].unique():
+                    crop_df = chart_df[chart_df['item'] == crop]
+                    fig.add_trace(go.Scatter(
+                        x=crop_df['Date'],
+                        y=crop_df['price'],
+                        mode='lines+markers',
+                        name=crop
+                    ))
+                
+                fig.update_layout(
+                    title=f"Price Trends ({selected_market})",
+                    xaxis_title="Date",
+                    yaxis_title="Price (LKR/kg)",
+                    template='plotly_white',
+                    height=400,
+                    hovermode='x unified'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Recent entries table
+            st.markdown("### Recent Entries (Last 50)")
+            display_cols = ['Date', 'market', 'item', 'price', 'volume_MT']
+            st.dataframe(
+                filtered_df[display_cols].sort_values('Date', ascending=False).head(50),
+                use_container_width=True
             )
-            st.plotly_chart(fig, use_container_width=True)
         
-        # Recent entries table
-        st.markdown("### Recent Entries (Last 50)")
-        display_cols = ['Date', 'market', 'item', 'price', 'volume_MT']
-        st.dataframe(
-            filtered_df[display_cols].sort_values('Date', ascending=False).head(50),
-            use_container_width=True
-        )
+        # TAB 2: Market Comparison
+        with view_tab2:
+            st.markdown("### 🔄 Compare Prices Across Markets")
+            st.info("Select a crop to see current prices across different markets")
+            
+            compare_crop = st.selectbox("Select Crop to Compare", options=TARGET_CROPS, key="compare_crop")
+            
+            if compare_crop:
+                crop_df = df[df['item'] == compare_crop].copy()
+                
+                if not crop_df.empty:
+                    # Get latest prices by market
+                    latest_date = crop_df['Date'].max()
+                    recent_df = crop_df[crop_df['Date'] >= (latest_date - pd.Timedelta(days=7))]
+                    
+                    market_summary = recent_df.groupby('market').agg({
+                        'price': ['mean', 'min', 'max'],
+                        'volume_MT': 'sum'
+                    }).reset_index()
+                    
+                    market_summary.columns = ['Market', 'Avg Price', 'Min Price', 'Max Price', 'Total Volume']
+                    market_summary = market_summary.sort_values('Avg Price', ascending=False)
+                    
+                    # Display as metrics
+                    st.markdown(f"#### Last 7 Days Average for {compare_crop}")
+                    
+                    # Top 3 markets by price
+                    top_markets = market_summary.head(3)
+                    cols = st.columns(3)
+                    
+                    for i, (_, row) in enumerate(top_markets.iterrows()):
+                        with cols[i]:
+                            st.metric(
+                                f"🏆 {row['Market']}",
+                                f"{row['Avg Price']:.2f} LKR/kg",
+                                f"±{(row['Max Price'] - row['Min Price'])/2:.1f}"
+                            )
+                    
+                    st.markdown("---")
+                    
+                    # Full comparison table
+                    st.dataframe(
+                        market_summary.style.background_gradient(subset=['Avg Price'], cmap='RdYlGn'),
+                        use_container_width=True
+                    )
+                    
+                    # Price comparison chart
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        x=market_summary['Market'],
+                        y=market_summary['Avg Price'],
+                        text=market_summary['Avg Price'].round(2),
+                        textposition='auto',
+                        marker_color='lightblue'
+                    ))
+                    
+                    fig.update_layout(
+                        title=f"{compare_crop} - Average Price by Market (Last 7 Days)",
+                        xaxis_title="Market",
+                        yaxis_title="Price (LKR/kg)",
+                        template='plotly_white',
+                        height=400
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning(f"No data available for {compare_crop}")
 
 # ============================================================================
 # MODE: RETRAIN MODELS
@@ -537,7 +609,7 @@ elif mode == '🔄 Retrain Models':
                 results = retrain_models(
                     price_data_path=DATA_PATH,
                     demand_data_path=DEMAND_DATA_PATH,
-                    save_dir=str(BASE_DIR.parent / 'models' / 'saved_models'),
+                    save_dir=os.path.join(PROJECT_ROOT, 'models', 'saved_models'),
                     progress_callback=progress_callback
                 )
                 
@@ -588,6 +660,93 @@ elif mode == '🔄 Retrain Models':
                 st.exception(e)
     else:
         st.warning("No data available. Add daily data first before retraining.")
+
+# ============================================================================
+# MODE: SETTINGS
+# ============================================================================
+elif mode == '⚙️ Settings':
+    st.subheader("⚙️ User Preferences")
+    
+    # Initialize session state for settings if not exists
+    if 'user_settings' not in st.session_state:
+        st.session_state.user_settings = {
+            'min_acceptable_price': {},
+            'risk_level': 'Medium',
+            'alert_quiet_hours': {'start': 22, 'end': 7},
+            'sms_alerts_enabled': False,
+            'sms_number': ''
+        }
+    
+    settings = st.session_state.user_settings
+    
+    # Minimum Price Settings
+    st.markdown("### 💰 Minimum Acceptable Prices")
+    st.info("Set minimum prices you're willing to accept for each crop. System won't recommend selling below these.")
+    
+    price_cols = st.columns(4)
+    for i, crop in enumerate(TARGET_CROPS):
+        with price_cols[i]:
+            current_min = settings['min_acceptable_price'].get(crop, 0.0)
+            settings['min_acceptable_price'][crop] = st.number_input(
+                f"{crop} (LKR/kg)",
+                min_value=0.0,
+                value=float(current_min),
+                step=10.0,
+                key=f"min_price_{crop}"
+            )
+    
+    st.markdown("---")
+    
+    # Risk Level
+    st.markdown("### 📊 Risk Tolerance")
+    settings['risk_level'] = st.select_slider(
+        "How much price volatility can you tolerate?",
+        options=['Conservative', 'Medium', 'Aggressive'],
+        value=settings['risk_level']
+    )
+    
+    if settings['risk_level'] == 'Conservative':
+        st.info("🛡️ **Conservative:** Prefer selling early to avoid risk, even if potential gains exist.")
+    elif settings['risk_level'] == 'Aggressive':
+        st.info("📈 **Aggressive:** Willing to hold longer for higher potential profits, accepting more risk.")
+    else:
+        st.info("⚖️ **Medium:** Balanced approach between safety and profit maximization.")
+    
+    st.markdown("---")
+    
+    # Alert Settings
+    st.markdown("### 🔔 Alert Preferences")
+    
+    alert_cols = st.columns(2)
+    
+    with alert_cols[0]:
+        st.markdown("**Quiet Hours** (No alerts during these times)")
+        quiet_start = st.slider("Start Hour", 0, 23, settings['alert_quiet_hours']['start'])
+        quiet_end = st.slider("End Hour", 0, 23, settings['alert_quiet_hours']['end'])
+        settings['alert_quiet_hours'] = {'start': quiet_start, 'end': quiet_end}
+    
+    with alert_cols[1]:
+        st.markdown("**SMS Alerts** (Coming Soon)")
+        settings['sms_alerts_enabled'] = st.checkbox(
+            "Enable SMS alerts",
+            value=settings['sms_alerts_enabled'],
+            disabled=True,
+            help="SMS feature will be available in future update"
+        )
+        settings['sms_number'] = st.text_input(
+            "Phone Number",
+            value=settings['sms_number'],
+            placeholder="+94771234567",
+            disabled=True
+        )
+    
+    st.markdown("---")
+    
+    # Save button
+    if st.button("💾 Save Settings", type="primary", use_container_width=True):
+        st.session_state.user_settings = settings
+        st.success("✅ Settings saved successfully!")
+        st.balloons()
 
 # ============================================================================
 # MODE: GET PREDICTION
@@ -697,7 +856,7 @@ else:
             decision_emoji = '🟡'
         
         # Top metrics
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
             decision_text = result['decision']
@@ -714,11 +873,38 @@ else:
             st.metric(lang['confidence'], f"{result.get('confidence',0):.0f}%")
         
         with col3:
+            # Trend Signal
+            trend = result.get('trend_signal', 'Steady →')
+            st.metric("Price Trend", trend)
+        
+        with col4:
             profit = result.get('expected_profit_per_kg', 0)
             st.metric(f"{lang['expected_profit']}/kg", f"{profit:.2f} LKR", f"{'+' if profit > 0 else ''}{profit:.2f}")
         
-        with col4:
+        with col5:
             st.metric("Total Profit", f"{result.get('expected_profit_total',0):.0f} LKR")
+        
+        # Seasonal & Festival Context
+        season_info = result.get('season', {})
+        festivals = result.get('upcoming_festivals', [])
+        
+        if season_info or festivals:
+            st.markdown("---")
+            context_cols = st.columns([1, 2])
+            
+            with context_cols[0]:
+                if season_info:
+                    season_name = season_info.get('name', 'N/A')
+                    season_desc = season_info.get('description', '')
+                    st.info(f"🌾 **Season:** {season_name} ({season_desc})")
+            
+            with context_cols[1]:
+                if festivals:
+                    festival_text = " | ".join([
+                        f"🎉 **{f['name']}** in {f['days_until']} days" 
+                        for f in festivals[:2]  # Show max 2 festivals
+                    ])
+                    st.warning(festival_text)
         
         st.markdown("---")
         

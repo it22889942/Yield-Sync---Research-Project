@@ -10,7 +10,8 @@ HORIZONS = {
     '1 Week': 7,
     '2 Weeks': 14,
     '1 Month': 30,
-    '2 Months': 60
+    '2 Months': 60,
+    '3 Months': 84
 }
 
 # Perishability (Days until spoiled without storage)
@@ -36,6 +37,30 @@ DEFAULT_WEATHER = {
     'humidity_percent': 75.0,
     'wind_speed': 13.5,
     'sunshine_hours': 10.5
+}
+
+# Sri Lankan Agricultural Seasons
+SEASONS = {
+    'Maha': {'months': [10, 11, 12, 1, 2, 3], 'name_si': 'මහ', 'description': 'Main cultivation season (Oct-Mar)'},
+    'Yala': {'months': [4, 5, 6, 7, 8, 9], 'name_si': 'යල', 'description': 'Secondary season (Apr-Sep)'}
+}
+
+# Major Sri Lankan Festivals (approximate dates - vary by lunar calendar)
+FESTIVALS = {
+    'Sinhala New Year': {'month': 4, 'day': 14, 'impact': 'high', 'name_si': 'අලුත් අවුරුද්ද'},
+    'Vesak': {'month': 5, 'day': 15, 'impact': 'high', 'name_si': 'වෙසක්'},
+    'Poson': {'month': 6, 'day': 15, 'impact': 'medium', 'name_si': 'පොසොන්'},
+    'Esala': {'month': 7, 'day': 15, 'impact': 'medium', 'name_si': 'ඇසළ'},
+    'Christmas': {'month': 12, 'day': 25, 'impact': 'high', 'name_si': 'නත්තල'},
+    'Thai Pongal': {'month': 1, 'day': 14, 'impact': 'medium', 'name_si': 'තෛ පොංගල්'}
+}
+
+# Harvest Periods by Crop
+HARVEST_PERIODS = {
+    'Rice': [3, 4, 8, 9],  # March-April (Maha), Aug-Sep (Yala)
+    'Beetroot': [7, 8, 9],
+    'Radish': [6, 7, 8],
+    'Red Onion': [6, 7, 8]
 }
 
 # UI Translations

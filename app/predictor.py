@@ -102,6 +102,9 @@ class SmartFarmingPredictor:
         }
     }
 
+    # Forecast horizons (matching trainer)
+    FORECAST_HORIZONS = [7, 14, 30, 60, 84]
+    
     # Estimated RMSE for each crop (based on validation set performance)
     # Used for calculating prediction intervals
     MODEL_RMSE = {
@@ -125,78 +128,124 @@ class SmartFarmingPredictor:
             model_base_dir = os.path.join(project_root, 'models', 'saved_models')
         
         self.model_base_dir = model_base_dir
+        # Store models by crop and horizon: {crop: {horizon: model}}
         self.demand_models = {}
         self.price_models = {}
-        self.price_scalers = {}   # Scalers for LSTM price models
-        self.price_configs = {}   # Config for each price model
+        self.price_scalers = {}   # Scalers for LSTM: {crop: {horizon: scaler}}
+        self.price_configs = {}   # Config for each price model: {crop: {horizon: config}}
         
         self._load_all_models()
     
     def _load_all_models(self):
-        """Load all models from models/saved_models/ directory (matching notebooks)."""
+        """Load all multi-horizon models from models/saved_models/ directory."""
         
         print("\n" + "="*60)
-        print("LOADING DEMAND MODELS")
+        print(f"LOADING MULTI-HORIZON DEMAND MODELS")
         print("="*60)
+        
+        demand_dir = os.path.join(self.model_base_dir, 'demand forcasting')
         
         for crop, config in self.DEMAND_CONFIG.items():
-            try:
-                model_path = os.path.join(self.model_base_dir, config['model_file'])
-                
-                if not os.path.exists(model_path):
-                    print(f"✗ {crop:12} model not found: {model_path}")
-                    continue
-                
-                if config['model_type'] == 'LSTM':
-                    self.demand_models[crop] = load_model(model_path, compile=False)
-                else:
-                    # RandomForest or LightGBM - load with joblib
-                    self.demand_models[crop] = joblib.load(model_path)
-                
-                print(f"✓ {crop:12} ({config['model_type']:12}) loaded")
+            self.demand_models[crop] = {}
+            loaded_count = 0
+            
+            for horizon in self.FORECAST_HORIZONS:
+                try:
+                    # Construct filename based on model type
+                    if config['model_type'] == 'LSTM':
+                        filename = f'demand_{crop}_{horizon}day_lstm.h5'
+                    elif config['model_type'] == 'RandomForest':
+                        filename = f'demand_{crop}_{horizon}day_rf.pkl'
+                    elif config['model_type'] == 'LightGBM':
+                        filename = f'demand_{crop}_{horizon}day_lgb.pkl'
+                    else:
+                        continue
                     
-            except Exception as e:
-                print(f"✗ {crop:12} - Error: {str(e)[:50]}")
+                    model_path = os.path.join(demand_dir, filename)
+                    
+                    if not os.path.exists(model_path):
+                        # Try without spaces in crop name
+                        filename_alt = filename.replace(' ', '_')
+                        model_path = os.path.join(demand_dir, filename_alt)
+                    
+                    if os.path.exists(model_path):
+                        if config['model_type'] == 'LSTM':
+                            self.demand_models[crop][horizon] = load_model(model_path, compile=False)
+                        else:
+                            self.demand_models[crop][horizon] = joblib.load(model_path)
+                        loaded_count += 1
+                except Exception as e:
+                    print(f"  ✗ {crop} {horizon}day - Error: {str(e)[:40]}")
+            
+            if loaded_count > 0:
+                print(f"✓ {crop:12} ({config['model_type']:12}) - {loaded_count}/5 horizons")
+            else:
+                print(f"✗ {crop:12} - No models found")
         
         print("\n" + "="*60)
-        print("LOADING PRICE MODELS")
+        print(f"LOADING MULTI-HORIZON PRICE MODELS")
         print("="*60)
         
+        price_dir = os.path.join(self.model_base_dir, 'price forcasting')
+        
         for crop, config in self.PRICE_CONFIG.items():
-            try:
-                model_path = os.path.join(self.model_base_dir, config['model_file'])
-                
-                if not os.path.exists(model_path):
-                    print(f"✗ {crop:12} model not found: {model_path}")
-                    continue
-                
-                if config['model_type'] == 'LSTM':
-                    self.price_models[crop] = load_model(model_path, compile=False)
-                    # Load scalers for LSTM
-                    if 'scalers_file' in config:
-                        scalers_path = os.path.join(self.model_base_dir, config['scalers_file'])
-                        if os.path.exists(scalers_path):
-                            self.price_scalers[crop] = joblib.load(scalers_path)
-                            print(f"  ✓ {crop:12} scalers loaded")
-                else:
-                    # RandomForest or LightGBM
-                    self.price_models[crop] = joblib.load(model_path)
-                
-                # Load config
-                if 'config_file' in config:
-                    config_path = os.path.join(self.model_base_dir, config['config_file'])
-                    if os.path.exists(config_path):
-                        self.price_configs[crop] = joblib.load(config_path)
-                
-                print(f"✓ {crop:12} ({config['model_type']:12}) loaded")
+            self.price_models[crop] = {}
+            self.price_scalers[crop] = {}
+            self.price_configs[crop] = {}
+            loaded_count = 0
+            
+            crop_slug = crop.lower().replace(' ', '_')
+            
+            for horizon in self.FORECAST_HORIZONS:
+                try:
+                    # Construct filename based on model type
+                    if config['model_type'] == 'LSTM':
+                        model_file = f'{crop_slug}_{horizon}day_lstm.h5'
+                        scalers_file = f'{crop_slug}_{horizon}day_lstm_scalers.joblib'
+                    elif config['model_type'] == 'RandomForest':
+                        model_file = f'{crop_slug}_{horizon}day_rf.joblib'
+                        scalers_file = None
+                    elif config['model_type'] == 'LightGBM':
+                        model_file = f'{crop_slug}_{horizon}day_lgbm.joblib'
+                        scalers_file = None
+                    else:
+                        continue
                     
-            except Exception as e:
-                print(f"✗ {crop:12} - Error: {str(e)[:50]}")
+                    config_file = f'{crop_slug}_{horizon}day_config.joblib'
+                    
+                    model_path = os.path.join(price_dir, model_file)
+                    
+                    if os.path.exists(model_path):
+                        if config['model_type'] == 'LSTM':
+                            self.price_models[crop][horizon] = load_model(model_path, compile=False)
+                            # Load scalers
+                            if scalers_file:
+                                scalers_path = os.path.join(price_dir, scalers_file)
+                                if os.path.exists(scalers_path):
+                                    self.price_scalers[crop][horizon] = joblib.load(scalers_path)
+                        else:
+                            self.price_models[crop][horizon] = joblib.load(model_path)
+                        
+                        # Load config
+                        config_path = os.path.join(price_dir, config_file)
+                        if os.path.exists(config_path):
+                            self.price_configs[crop][horizon] = joblib.load(config_path)
+                        
+                        loaded_count += 1
+                except Exception as e:
+                    print(f"  ✗ {crop} {horizon}day - Error: {str(e)[:40]}")
+            
+            if loaded_count > 0:
+                print(f"✓ {crop:12} ({config['model_type']:12}) - {loaded_count}/5 horizons")
+            else:
+                print(f"✗ {crop:12} - No models found")
         
         print("\n" + "="*60)
         print("MODEL LOADING COMPLETE")
-        print(f"Demand models loaded: {len(self.demand_models)}/4")
-        print(f"Price models loaded: {len(self.price_models)}/4")
+        total_demand = sum(len(models) for models in self.demand_models.values())
+        total_price = sum(len(models) for models in self.price_models.values())
+        print(f"Demand models loaded: {total_demand}/20 (4 crops × 5 horizons)")
+        print(f"Price models loaded: {total_price}/20 (4 crops × 5 horizons)")
         print("="*60 + "\n")
     
     def _add_temporal_features(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -353,19 +402,24 @@ class SmartFarmingPredictor:
     
     def predict_demand(self, current_data: pd.DataFrame, crop: str, days_ahead: int = 7) -> Dict:
         """
-        Predict future quantity demanded for crop.
-        Matches demand_forecasting.ipynb approach.
+        Predict future quantity demanded for crop using multi-horizon models.
         
         Args:
             current_data: DataFrame with columns ['Date', 'item', 'market', 'quantity_tonnes', 'price', ...]
             crop: Crop name ('Rice', 'Beetroot', 'Radish', 'Red Onion')
-            days_ahead: Forecast horizon (not used in actual prediction, for reference)
+            days_ahead: Forecast horizon (days)
         
         Returns:
             Dict with predicted demand or error message
         """
         if crop not in self.demand_models:
             return {'error': f'Demand model for {crop} not loaded'}
+        
+        # Select appropriate horizon model
+        horizon = self._select_horizon(days_ahead)
+        
+        if horizon not in self.demand_models[crop]:
+            return {'error': f'No {horizon}-day model available for {crop}'}
         
         # Get crop data and validate
         crop_data = current_data[current_data['item'] == crop].copy().sort_values('Date')
@@ -380,6 +434,7 @@ class SmartFarmingPredictor:
             return {'error': error}
         
         config = self.DEMAND_CONFIG[crop]
+        model = self.demand_models[crop][horizon]
         
         # Scale features
         scaler = MinMaxScaler()
@@ -389,11 +444,11 @@ class SmartFarmingPredictor:
         if config['model_type'] == 'LSTM':
             # LSTM: Reshape for [samples, timesteps, features]
             features_scaled = features_scaled.reshape((1, config['lag_days'], 1))
-            predicted = self.demand_models[crop].predict(features_scaled, verbose=0)
+            predicted = model.predict(features_scaled, verbose=0)
             predicted_demand = float(predicted[0][0])
         else:
             # RandomForest or LightGBM
-            predicted = self.demand_models[crop].predict(features_scaled)
+            predicted = model.predict(features_scaled)
             predicted_demand = float(predicted[0])
         
         # Calculate change percentage
@@ -406,15 +461,24 @@ class SmartFarmingPredictor:
             'predicted_quantity': predicted_demand,  # Alias for compatibility
             'demand_change_percent': demand_change_pct,
             'days_ahead': days_ahead,
+            'horizon_used': horizon,  # Show which model was actually used
             'model_type': config['model_type'],
             'lag_days': config['lag_days']
         }
     
+    def _select_horizon(self, days_ahead: int) -> int:
+        """
+        Select the best horizon model for the requested days_ahead.
+        Returns the closest available horizon from FORECAST_HORIZONS.
+        """
+        # Find closest horizon
+        closest_horizon = min(self.FORECAST_HORIZONS, key=lambda h: abs(h - days_ahead))
+        return closest_horizon
+    
     def predict_price(self, current_data: pd.DataFrame, crop: str, 
                       days_ahead: int = 7) -> Dict:
         """
-        Predict future price for crop using per-crop models.
-        Matches 2_model_comparison.ipynb approach.
+        Predict future price for crop using multi-horizon models.
         
         Args:
             current_data: DataFrame with columns ['Date', 'item', 'price', ...]
@@ -427,6 +491,12 @@ class SmartFarmingPredictor:
         if crop not in self.price_models:
             return {'error': f'Price model for {crop} not loaded'}
         
+        # Select appropriate horizon model
+        horizon = self._select_horizon(days_ahead)
+        
+        if horizon not in self.price_models[crop]:
+            return {'error': f'No {horizon}-day model available for {crop}'}
+        
         # Get crop data and validate
         crop_data = current_data[current_data['item'] == crop].copy().sort_values('Date')
         if len(crop_data) == 0:
@@ -434,6 +504,7 @@ class SmartFarmingPredictor:
         
         current_price = crop_data['price'].iloc[-1]
         config = self.PRICE_CONFIG[crop]
+        model = self.price_models[crop][horizon]
         
         # Create features
         feature_vector, error = self._create_price_features(current_data, crop)
@@ -442,15 +513,16 @@ class SmartFarmingPredictor:
         
         try:
             if config['model_type'] == 'LSTM':
-                # LSTM with scaling - scaler expects shape (n_samples, 1)
-                if crop in self.price_scalers and 'y' in self.price_scalers[crop]:
-                    scaler_y = self.price_scalers[crop]['y']
+                # LSTM with scaling
+                if crop in self.price_scalers and horizon in self.price_scalers[crop]:
+                    scalers = self.price_scalers[crop][horizon]
+                    scaler_y = scalers['y']
                     # Scale each price value individually (reshape to column vector)
                     prices_column = feature_vector.reshape(-1, 1)  # (60, 1)
                     features_scaled = scaler_y.transform(prices_column)
                     # Reshape for LSTM: [1, timesteps, 1]
                     features_scaled = features_scaled.reshape((1, config['lag_days'], 1))
-                    predicted_scaled = self.price_models[crop].predict(features_scaled, verbose=0)
+                    predicted_scaled = model.predict(features_scaled, verbose=0)
                     # Inverse transform
                     predicted_price = float(scaler_y.inverse_transform(predicted_scaled.reshape(-1, 1))[0][0])
                 else:
@@ -459,11 +531,11 @@ class SmartFarmingPredictor:
                     prices_column = feature_vector.reshape(-1, 1)
                     features_scaled = scaler.fit_transform(prices_column)
                     features_scaled = features_scaled.reshape((1, config['lag_days'], 1))
-                    predicted = self.price_models[crop].predict(features_scaled, verbose=0)
+                    predicted = model.predict(features_scaled, verbose=0)
                     predicted_price = float(predicted[0][0])
             else:
                 # RandomForest or LightGBM (no scaling needed)
-                predicted = self.price_models[crop].predict(feature_vector)
+                predicted = model.predict(feature_vector)
                 predicted_price = float(predicted[0])
             
             # Ensure non-negative price
@@ -492,6 +564,7 @@ class SmartFarmingPredictor:
                 'margin': margin
             },
             'days_ahead': days_ahead,
+            'horizon_used': horizon,  # Show which model was actually used
             'model_type': config['model_type'],
             'lag_days': config['lag_days']
         }
@@ -711,8 +784,8 @@ class YieldSyncPredictor(SmartFarmingPredictor):
         demand_predictions = {}
         
         # 2. Get Forecasts for standard horizons
-        horizons = [7, 14, 30, 60]
-        labels = ['1 Week', '2 Weeks', '1 Month', '2 Months']
+        horizons = [7, 14, 30, 60, 84]  # Added 12 weeks (84 days)
+        labels = ['1 Week', '2 Weeks', '1 Month', '2 Months', '3 Months']
         
         # Profit Config Defaults for V2.0
         profit_config = ProfitConfig(
@@ -776,6 +849,21 @@ class YieldSyncPredictor(SmartFarmingPredictor):
         except Exception:
             pass
         
+        # Calculate trend signal (Rising/Steady/Falling)
+        trend_signal = "Steady →"
+        if len(predictions) >= 2:
+            prices_list = [predictions[l] for l in labels[:len(predictions)]]
+            first_price = prices_list[0]
+            last_price = prices_list[-1]
+            price_change_pct = ((last_price - current_price) / current_price * 100) if current_price > 0 else 0
+            
+            if price_change_pct > 5:
+                trend_signal = "Rising ↗️"
+            elif price_change_pct < -5:
+                trend_signal = "Falling ↘️"
+            else:
+                trend_signal = "Steady →"
+        
         return {
             'decision': best_decision,
             'confidence': 85.0 if best_decision != "WAIT" else 60.0,
@@ -787,8 +875,56 @@ class YieldSyncPredictor(SmartFarmingPredictor):
             'best_price': best_price,
             'current_price': current_price,
             'predictions': predictions,
-            'demand_predictions': demand_predictions
+            'demand_predictions': demand_predictions,
+            'trend_signal': trend_signal,
+            'season': self._get_season(current_date),
+            'upcoming_festivals': self._get_upcoming_festivals(current_date, days=30)
         }
+    
+    def _get_season(self, date: datetime) -> Dict:
+        """Get current agricultural season"""
+        month = date.month
+        if month in [10, 11, 12, 1, 2, 3]:
+            return {'name': 'Maha', 'name_si': 'මහ', 'description': 'Main cultivation season'}
+        else:
+            return {'name': 'Yala', 'name_si': 'යල', 'description': 'Secondary season'}
+    
+    def _get_upcoming_festivals(self, date: datetime, days: int = 30) -> List[Dict]:
+        """Get festivals within next N days"""
+        festivals = []
+        current_month = date.month
+        current_day = date.day
+        
+        # Major festivals (approximate - would need lunar calendar for exact dates)
+        festival_data = [
+            {'name': 'Sinhala New Year', 'month': 4, 'day': 14, 'impact': 'high'},
+            {'name': 'Vesak', 'month': 5, 'day': 15, 'impact': 'high'},
+            {'name': 'Poson', 'month': 6, 'day': 15, 'impact': 'medium'},
+            {'name': 'Esala', 'month': 7, 'day': 15, 'impact': 'medium'},
+            {'name': 'Christmas', 'month': 12, 'day': 25, 'impact': 'high'},
+            {'name': 'Thai Pongal', 'month': 1, 'day': 14, 'impact': 'medium'}
+        ]
+        
+        for fest in festival_data:
+            # Simple check if festival is within next 30 days (approximate)
+            if fest['month'] == current_month and fest['day'] >= current_day:
+                days_until = fest['day'] - current_day
+                if days_until <= days:
+                    festivals.append({
+                        'name': fest['name'],
+                        'days_until': days_until,
+                        'impact': fest['impact']
+                    })
+            elif fest['month'] == current_month + 1:
+                days_until = (30 - current_day) + fest['day']
+                if days_until <= days:
+                    festivals.append({
+                        'name': fest['name'],
+                        'days_until': days_until,
+                        'impact': fest['impact']
+                    })
+        
+        return festivals
 
 # Example usage
 if __name__ == '__main__':

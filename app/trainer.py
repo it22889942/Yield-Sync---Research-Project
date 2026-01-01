@@ -37,8 +37,11 @@ except ImportError:
 
 
 # =============================================================================
-# CONFIGURATION (Matching Notebooks)
+# CONFIGURATION (Matching Notebooks + Multi-Horizon)
 # =============================================================================
+
+# Multi-horizon forecasting: train separate models for each time horizon
+FORECAST_HORIZONS = [7, 14, 30, 60, 84]  # 1 week, 2 weeks, 1 month, 2 months, 3 months
 
 DEMAND_CONFIG = {
     'Rice': {
@@ -135,8 +138,19 @@ def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def create_demand_lag_features(df: pd.DataFrame, crop: str, lag_days: int) -> pd.DataFrame:
-    """Create lag features for demand forecasting matching notebook"""
+def create_demand_lag_features(df: pd.DataFrame, crop: str, lag_days: int, horizon: int = 1) -> pd.DataFrame:
+    """
+    Create lag features for demand forecasting with target horizon
+    
+    Args:
+        df: DataFrame with demand data
+        crop: Crop name
+        lag_days: Number of lag days to use as features
+        horizon: Days ahead to predict (1, 7, 14, 30, 60, 84)
+    
+    Returns:
+        DataFrame with features and target shifted by horizon
+    """
     crop_df = df[df['item'] == crop].copy().sort_values('Date')
     
     # Create quantity lags
@@ -147,20 +161,30 @@ def create_demand_lag_features(df: pd.DataFrame, crop: str, lag_days: int) -> pd
     for i in range(1, lag_days + 1):
         crop_df[f'price_lag_{i}'] = crop_df['price'].shift(i)
     
-    # Drop NaN rows
+    # Create target: quantity_tonnes shifted by -horizon (future value)
+    crop_df['target'] = crop_df['quantity_tonnes'].shift(-horizon)
+    
+    # Drop NaN rows (from lag creation and future target)
     crop_df = crop_df.dropna()
     
     return crop_df
 
 
-def create_price_features(df: pd.DataFrame, crop: str, lag_days: int, 
+def create_price_features(df: pd.DataFrame, crop: str, lag_days: int, horizon: int = 1,
                           include_weather: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Create features for price forecasting matching 2_model_comparison.ipynb
+    Create features for price forecasting with target horizon
+    
+    Args:
+        df: DataFrame with price data
+        crop: Crop name
+        lag_days: Number of lag days to use
+        horizon: Days ahead to predict (1, 7, 14, 30, 60, 84)
+        include_weather: Whether to include weather features
     
     Returns:
         X: Feature array
-        y: Target array
+        y: Target array (prices at horizon days ahead)
     """
     crop_df = df[df['item'] == crop].copy().sort_values('Date')
     
@@ -181,11 +205,15 @@ def create_price_features(df: pd.DataFrame, crop: str, lag_days: int,
     
     series_df = pd.DataFrame(resampled).dropna()
     
-    # Create lag features
+    # Need enough data for lag_days + horizon
+    if len(series_df) < lag_days + horizon:
+        return np.array([]), np.array([]), series_df
+    
+    # Create lag features with target at horizon days ahead
     feature_cols = [c for c in series_df.columns if c != 'price']
     X, y = [], []
     
-    for i in range(lag_days, len(series_df)):
+    for i in range(lag_days, len(series_df) - horizon):
         row_feats = []
         # Price lags
         row_feats.extend(series_df['price'].values[i-lag_days:i])
@@ -193,7 +221,8 @@ def create_price_features(df: pd.DataFrame, crop: str, lag_days: int,
         for col in feature_cols:
             row_feats.extend(series_df[col].values[i-lag_days:i])
         X.append(row_feats)
-        y.append(series_df['price'].values[i])
+        # Target is horizon days ahead
+        y.append(series_df['price'].values[i + horizon])
     
     return np.array(X), np.array(y), series_df
 
@@ -220,14 +249,15 @@ class ModelTrainer:
         
         self.training_results = {}
     
-    def train_demand_model(self, df: pd.DataFrame, crop: str, 
+    def train_demand_model(self, df: pd.DataFrame, crop: str, horizon: int,
                            progress_callback: Optional[Callable] = None) -> Dict:
         """
-        Train demand model for a specific crop.
+        Train demand model for a specific crop and horizon.
         
         Args:
             df: DataFrame with demand data
             crop: Crop name
+            horizon: Days ahead to predict (7, 14, 30, 60, 84)
             progress_callback: Optional callback for progress updates
         
         Returns:
@@ -237,16 +267,16 @@ class ModelTrainer:
         lag_days = config['lag_days']
         
         if progress_callback:
-            progress_callback(f"Training demand model for {crop}...")
+            progress_callback(f"Training {crop} demand model for {horizon}-day horizon...")
         
         # Add temporal features
         df_features = add_temporal_features(df)
         
-        # Create lag features
-        crop_df = create_demand_lag_features(df_features, crop, lag_days)
+        # Create lag features with target horizon
+        crop_df = create_demand_lag_features(df_features, crop, lag_days, horizon)
         
-        if len(crop_df) < lag_days + 100:
-            return {'error': f'Insufficient data for {crop}: need {lag_days + 100}, have {len(crop_df)}'}
+        if len(crop_df) < lag_days + horizon + 100:
+            return {'error': f'Insufficient data for {crop}: need {lag_days + horizon + 100}, have {len(crop_df)}'}
         
         # Split train/test (80/20)
         split_idx = int(len(crop_df) * 0.8)
@@ -257,13 +287,13 @@ class ModelTrainer:
         if config['univariate']:
             feature_cols = [c for c in train_df.columns if c.startswith('qty_lag_')]
         else:
-            exclude_cols = ['Date', 'market', 'item', 'quantity_tonnes', 'holiday_name']
+            exclude_cols = ['Date', 'market', 'item', 'quantity_tonnes', 'target', 'holiday_name']
             feature_cols = [c for c in train_df.columns if c not in exclude_cols and not c.startswith('Unnamed')]
         
         X_train = train_df[feature_cols].values
-        y_train = train_df['quantity_tonnes'].values
+        y_train = train_df['target'].values  # Use 'target' instead of 'quantity_tonnes'
         X_test = test_df[feature_cols].values
-        y_test = test_df['quantity_tonnes'].values
+        y_test = test_df['target'].values
         
         # Scale features
         scaler = MinMaxScaler()
@@ -294,8 +324,8 @@ class ModelTrainer:
             
             y_pred = model.predict(X_test_lstm, verbose=0).flatten()
             
-            # Save model
-            model_path = os.path.join(self.demand_dir, f'demand_{crop}_lstm.h5')
+            # Save model with horizon in filename
+            model_path = os.path.join(self.demand_dir, f'demand_{crop}_{horizon}day_lstm.h5')
             model.save(model_path)
             
         elif config['model_type'] == 'RandomForest':
@@ -308,8 +338,8 @@ class ModelTrainer:
             model.fit(X_train_scaled, y_train)
             y_pred = model.predict(X_test_scaled)
             
-            # Save model
-            model_path = os.path.join(self.demand_dir, f'demand_{crop}_rf.pkl')
+            # Save model with horizon in filename
+            model_path = os.path.join(self.demand_dir, f'demand_{crop}_{horizon}day_rf.pkl')
             joblib.dump(model, model_path)
             
         elif config['model_type'] == 'LightGBM' and HAS_LGBM:
@@ -323,8 +353,8 @@ class ModelTrainer:
             model.fit(X_train_scaled, y_train)
             y_pred = model.predict(X_test_scaled)
             
-            # Save model
-            model_path = os.path.join(self.demand_dir, f'demand_{crop}_lgb.pkl')
+            # Save model with horizon in filename
+            model_path = os.path.join(self.demand_dir, f'demand_{crop}_{horizon}day_lgb.pkl')
             joblib.dump(model, model_path)
         else:
             return {'error': f'Model type {config["model_type"]} not available'}
@@ -336,6 +366,7 @@ class ModelTrainer:
         
         result = {
             'crop': crop,
+            'horizon': horizon,
             'model_type': config['model_type'],
             'lag_days': lag_days,
             'train_samples': len(X_train),
@@ -347,18 +378,19 @@ class ModelTrainer:
         }
         
         if progress_callback:
-            progress_callback(f"✓ {crop} demand model trained (MAE: {mae:.2f})")
+            progress_callback(f"✓ {crop} {horizon}-day demand model trained (MAE: {mae:.2f})")
         
         return result
     
-    def train_price_model(self, df: pd.DataFrame, crop: str,
+    def train_price_model(self, df: pd.DataFrame, crop: str, horizon: int,
                           progress_callback: Optional[Callable] = None) -> Dict:
         """
-        Train price model for a specific crop.
+        Train price model for a specific crop and horizon.
         
         Args:
             df: DataFrame with price data
             crop: Crop name
+            horizon: Days ahead to predict (7, 14, 30, 60, 84)
             progress_callback: Optional callback for progress updates
         
         Returns:
@@ -369,7 +401,7 @@ class ModelTrainer:
         include_weather = not config['univariate']
         
         if progress_callback:
-            progress_callback(f"Training price model for {crop}...")
+            progress_callback(f"Training {crop} price model for {horizon}-day horizon...")
         
         # Get top market for this crop
         crop_df = df[df['item'] == crop]
@@ -378,8 +410,8 @@ class ModelTrainer:
         top_market = crop_df['market'].value_counts().idxmax()
         market_df = crop_df[crop_df['market'] == top_market].copy()
         
-        # Create features
-        X, y, series_df = create_price_features(market_df, crop, lag_days, include_weather)
+        # Create features with target horizon
+        X, y, series_df = create_price_features(market_df, crop, lag_days, horizon, include_weather)
         
         if len(X) < 100:
             return {'error': f'Insufficient data for {crop}: have {len(X)} samples'}
@@ -422,17 +454,18 @@ class ModelTrainer:
             y_pred_scaled = model.predict(X_test_lstm, verbose=0).flatten()
             y_pred = scaler_y.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
             
-            # Save model and scalers
+            # Save model and scalers with horizon
             crop_slug = crop.lower().replace(' ', '_')
-            model_path = os.path.join(self.price_dir, f'{crop_slug}_lstm.h5')
+            model_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_lstm.h5')
             model.save(model_path)
             
-            scalers_path = os.path.join(self.price_dir, f'{crop_slug}_lstm_scalers.joblib')
+            scalers_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_lstm_scalers.joblib')
             joblib.dump({'y': scaler_y}, scalers_path)
             
-            config_path = os.path.join(self.price_dir, f'{crop_slug}_config.joblib')
+            config_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_config.joblib')
             joblib.dump({
                 'model': 'LSTM',
+                'horizon': horizon,
                 'lag': lag_days,
                 'market': top_market,
                 'features': []
@@ -447,14 +480,15 @@ class ModelTrainer:
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
             
-            # Save model
+            # Save model with horizon
             crop_slug = crop.lower().replace(' ', '_')
-            model_path = os.path.join(self.price_dir, f'{crop_slug}_rf.joblib')
+            model_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_rf.joblib')
             joblib.dump(model, model_path)
             
-            config_path = os.path.join(self.price_dir, f'{crop_slug}_config.joblib')
+            config_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_config.joblib')
             joblib.dump({
                 'model': 'Random Forest',
+                'horizon': horizon,
                 'lag': lag_days,
                 'market': top_market,
                 'features': WEATHER_FEATURES if include_weather else []
@@ -469,14 +503,15 @@ class ModelTrainer:
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
             
-            # Save model
+            # Save model with horizon
             crop_slug = crop.lower().replace(' ', '_')
-            model_path = os.path.join(self.price_dir, f'{crop_slug}_lgbm.joblib')
+            model_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_lgbm.joblib')
             joblib.dump(model, model_path)
             
-            config_path = os.path.join(self.price_dir, f'{crop_slug}_config.joblib')
+            config_path = os.path.join(self.price_dir, f'{crop_slug}_{horizon}day_config.joblib')
             joblib.dump({
                 'model': 'LightGBM',
+                'horizon': horizon,
                 'lag': lag_days,
                 'market': top_market,
                 'features': WEATHER_FEATURES if include_weather else []
@@ -491,6 +526,7 @@ class ModelTrainer:
         
         result = {
             'crop': crop,
+            'horizon': horizon,
             'model_type': config['model_type'],
             'lag_days': lag_days,
             'market': top_market,
@@ -503,14 +539,14 @@ class ModelTrainer:
         }
         
         if progress_callback:
-            progress_callback(f"✓ {crop} price model trained (MAE: {mae:.2f})")
+            progress_callback(f"✓ {crop} {horizon}-day price model trained (MAE: {mae:.2f})")
         
         return result
     
     def train_all_models(self, price_df: pd.DataFrame, demand_df: pd.DataFrame,
                          progress_callback: Optional[Callable] = None) -> Dict:
         """
-        Train all 8 models (4 demand + 4 price).
+        Train all models for all horizons (4 crops × 5 horizons × 2 types = 40 models).
         
         Args:
             price_df: DataFrame with price data
@@ -529,38 +565,42 @@ class ModelTrainer:
         
         crops = ['Rice', 'Beetroot', 'Radish', 'Red Onion']
         
-        # Train demand models
+        # Train demand models for all horizons
         if progress_callback:
             progress_callback("="*50)
-            progress_callback("TRAINING DEMAND MODELS")
+            progress_callback(f"TRAINING DEMAND MODELS ({len(crops)} crops × {len(FORECAST_HORIZONS)} horizons)")
             progress_callback("="*50)
         
         for crop in crops:
-            try:
-                result = self.train_demand_model(demand_df, crop, progress_callback)
-                results['demand_models'][crop] = result
-                if 'error' in result:
+            results['demand_models'][crop] = {}
+            for horizon in FORECAST_HORIZONS:
+                try:
+                    result = self.train_demand_model(demand_df, crop, horizon, progress_callback)
+                    results['demand_models'][crop][f'{horizon}day'] = result
+                    if 'error' in result:
+                        results['success'] = False
+                except Exception as e:
+                    results['demand_models'][crop][f'{horizon}day'] = {'error': str(e)}
                     results['success'] = False
-            except Exception as e:
-                results['demand_models'][crop] = {'error': str(e)}
-                results['success'] = False
         
-        # Train price models
+        # Train price models for all horizons
         if progress_callback:
             progress_callback("")
             progress_callback("="*50)
-            progress_callback("TRAINING PRICE MODELS")
+            progress_callback(f"TRAINING PRICE MODELS ({len(crops)} crops × {len(FORECAST_HORIZONS)} horizons)")
             progress_callback("="*50)
         
         for crop in crops:
-            try:
-                result = self.train_price_model(price_df, crop, progress_callback)
-                results['price_models'][crop] = result
-                if 'error' in result:
+            results['price_models'][crop] = {}
+            for horizon in FORECAST_HORIZONS:
+                try:
+                    result = self.train_price_model(price_df, crop, horizon, progress_callback)
+                    results['price_models'][crop][f'{horizon}day'] = result
+                    if 'error' in result:
+                        results['success'] = False
+                except Exception as e:
+                    results['price_models'][crop][f'{horizon}day'] = {'error': str(e)}
                     results['success'] = False
-            except Exception as e:
-                results['price_models'][crop] = {'error': str(e)}
-                results['success'] = False
         
         if progress_callback:
             progress_callback("")
@@ -632,15 +672,27 @@ if __name__ == '__main__':
     print(f"Timestamp: {results['timestamp']}")
     
     print("\nDemand Models:")
-    for crop, res in results['demand_models'].items():
-        if 'error' in res:
-            print(f"  {crop}: ERROR - {res['error']}")
-        else:
-            print(f"  {crop}: MAE={res['mae']:.2f}, R²={res['r2']:.3f}")
+    for crop, horizons_dict in results['demand_models'].items():
+        print(f"  {crop}:")
+        if isinstance(horizons_dict, dict):
+            for horizon, res in horizons_dict.items():
+                if isinstance(res, dict):
+                    if 'error' in res:
+                        print(f"    {horizon}: ERROR - {res['error']}")
+                    elif 'mae' in res:
+                        print(f"    {horizon}: MAE={res['mae']:.2f}, R²={res.get('r2', 0):.3f}")
+                    else:
+                        print(f"    {horizon}: Trained (no metrics)")
     
     print("\nPrice Models:")
-    for crop, res in results['price_models'].items():
-        if 'error' in res:
-            print(f"  {crop}: ERROR - {res['error']}")
-        else:
-            print(f"  {crop}: MAE={res['mae']:.2f}, R²={res['r2']:.3f}")
+    for crop, horizons_dict in results['price_models'].items():
+        print(f"  {crop}:")
+        if isinstance(horizons_dict, dict):
+            for horizon, res in horizons_dict.items():
+                if isinstance(res, dict):
+                    if 'error' in res:
+                        print(f"    {horizon}: ERROR - {res['error']}")
+                    elif 'mae' in res:
+                        print(f"    {horizon}: MAE={res['mae']:.2f}, R²={res.get('r2', 0):.3f}")
+                    else:
+                        print(f"    {horizon}: Trained (no metrics)")
