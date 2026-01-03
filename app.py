@@ -84,6 +84,22 @@ def recommend():
             else:
                 df_lab = df_lab[df_lab['Hourly_Rate'] >= val]
 
+        # Season filter: extract season from query
+        season_match = re.search(r'\b(yala|maha)\b', query.lower())
+        if season_match and 'Season' in df_lab.columns:
+            season = season_match.group(1).capitalize()  # "Yala" or "Maha"
+            df_lab = df_lab[df_lab['Season'].str.lower() == season.lower()]
+
+        # Rating filter: extract rating threshold from query (supports decimals like 3.5)
+        rating_match = re.search(r'(above|below|more than|less than|over|under)\s*(\d+\.?\d*)\s*(?:rating|stars?)?$', query.lower())
+        if rating_match and 'Rating' in df_lab.columns:
+            direction, val = rating_match.groups()
+            val = float(val)
+            if direction in ['under', 'below', 'less than']:
+                df_lab = df_lab[df_lab['Rating'] <= val]
+            else:  # above, more than, over
+                df_lab = df_lab[df_lab['Rating'] >= val]
+
         if df_lab.empty:
             labour_results = []
         else:
@@ -123,6 +139,22 @@ def recommend():
                 df_eq = df_eq[df_eq['Hourly_Rate_LKR'] <= val]
             else:
                 df_eq = df_eq[df_eq['Hourly_Rate_LKR'] >= val]
+
+        # Season filter for equipment
+        season_match = re.search(r'\b(yala|maha)\b', query.lower())
+        if season_match and 'Season' in df_eq.columns:
+            season = season_match.group(1).capitalize()
+            df_eq = df_eq[df_eq['Season'].str.lower() == season.lower()]
+
+        # Rating filter for equipment
+        rating_match = re.search(r'(above|below|more than|less than|over|under)\s*(\d+\.?\d*)\s*(?:rating|stars?)?$', query.lower())
+        if rating_match and 'Rating' in df_eq.columns:
+            direction, val = rating_match.groups()
+            val = float(val)
+            if direction in ['under', 'below', 'less than']:
+                df_eq = df_eq[df_eq['Rating'] <= val]
+            else:  # above, more than, over
+                df_eq = df_eq[df_eq['Rating'] >= val]
 
         if df_eq.empty:
             equip_results = []
