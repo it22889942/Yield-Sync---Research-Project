@@ -346,7 +346,7 @@ class SmartFarmingPredictor:
         # Sri Lankan seasons: Maha (Oct-Mar), Yala (Apr-Sep)
         df['season_encoded'] = df['month'].apply(lambda x: 1 if x in [10,11,12,1,2,3] else 0)
         
-        # Harvest period
+        # Harvest period - will be set per-crop if needed
         df['harvest_period'] = df['month'].apply(lambda x: 1 if x in [1,2,3,8,9] else 0)
         
         return df
@@ -839,10 +839,13 @@ class YieldSyncPredictor(SmartFarmingPredictor):
         days_since_harvest: int
     ) -> Dict:
         """
-        V2.0 API for getting recommendations.
+        V2.0 API for getting recommendations with spoilage and holding cost analysis.
         """
         # 1. Prepare Data
         current_price = price_history[-1]
+        
+        # Import harvest periods from config
+        from config import HARVEST_PERIODS, PERISHABILITY
         
         # Construct dataframe for predictions
         # We assume daily intervals ending at current_date
@@ -887,20 +890,76 @@ class YieldSyncPredictor(SmartFarmingPredictor):
         horizons = [7, 14, 30, 60, 84]  # Added 12 weeks (84 days)
         labels = ['1 Week', '2 Weeks', '1 Month', '2 Months', '3 Months']
         
-        # Profit Config Defaults for V2.0
+        # Profit Config with Dynamic Spoilage Based on Days Since Harvest
+        # Spoilage accelerates as crop ages
+        perishability = PERISHABILITY.get(crop, 'Medium')
+        
+        # If days_since_harvest is -1, crop not yet harvested (no spoilage)
+        if days_since_harvest == -1:
+            # Planning mode - crop still growing
+            current_spoilage_rate = 0.0
+            shelf_life_remaining = 999  # No spoilage concern
+            urgency_warning = "🌱 Crop not harvested yet. Use predictions to plan optimal harvest timing."
+        else:
+            # Already harvested - calculate spoilage
+            # Base spoilage rates per day (%)
+            base_spoilage = {
+                'Very High': 2.0,  # Radish - spoils fast
+                'High': 1.5,       # Beetroot
+                'Medium': 1.0,     # Red Onion
+                'Low': 0.3         # Rice - lasts longer
+            }
+            
+            current_spoilage_rate = base_spoilage.get(perishability, 1.0)
+            
+            # Increase spoilage rate based on age (accelerates over time)
+            if days_since_harvest > 7:
+                current_spoilage_rate *= 1.5  # 50% faster spoilage after 1 week
+            if days_since_harvest > 14:
+                current_spoilage_rate *= 2.0  # Doubles after 2 weeks
+            if days_since_harvest > 21:
+                current_spoilage_rate *= 3.0  # Triples after 3 weeks
+            
+            # Calculate remaining shelf life
+            max_shelf_life = {
+                'Very High': 7,   # Radish - 1 week max
+                'High': 14,       # Beetroot - 2 weeks
+                'Medium': 21,     # Red Onion - 3 weeks
+                'Low': 90         # Rice - 3 months
+            }
+            
+            shelf_life_remaining = max_shelf_life.get(perishability, 14) - days_since_harvest
+            urgency_warning = ""
+            
+            # Critical spoilage warnings
+            if shelf_life_remaining <= 0:
+                urgency_warning = "⚠️ CRITICAL: Crop may be spoiled! Sell immediately at any price."
+            elif shelf_life_remaining <= 3:
+                urgency_warning = f"🔴 URGENT: Only {shelf_life_remaining} days before spoiling! Sell NOW."
+            elif shelf_life_remaining <= 7:
+                urgency_warning = f"⚠️ WARNING: {shelf_life_remaining} days shelf life remaining. Sell soon."
+        
+        # Storage cost increases with perishability (need better storage for perishable items)
+        storage_cost_per_kg = {
+            'Very High': 2.0,  # Refrigerated storage needed
+            'High': 1.5,
+            'Medium': 1.0,
+            'Low': 0.5         # Simple warehouse
+        }
+        
         profit_config = ProfitConfig(
             transport_cost=5.0,
-            storage_cost=1.0,
-            spoilage_rate=0.5
+            storage_cost=storage_cost_per_kg.get(perishability, 1.0),
+            spoilage_rate=current_spoilage_rate
         )
 
         best_decision = "WAIT"
-        best_profit = 0.0  # Default to 0 instead of -inf
+        best_profit = -float('inf')  # Changed from 0.0 to allow negative profits
         best_horizon = 0
         best_price = current_price
         best_reason = "No profitable opportunity found."
         
-        # Get Price Predictions
+        # Get Price Predictions for ALL horizons (farmers need long-term market view)
         for days, label in zip(horizons, labels):
             try:
                 pred = self.predict_price(df, crop, days)
@@ -908,9 +967,26 @@ class YieldSyncPredictor(SmartFarmingPredictor):
                     p_price = pred['predicted_price']
                     predictions[label] = round(p_price, 2)
                     
-                    # Profit Logic
-                    spoilage_loss_kg = quantity_kg * (profit_config.spoilage_rate / 100 * days)
-                    remaining_qty = max(0, quantity_kg - spoilage_loss_kg)
+                    # Profit Logic with cumulative spoilage
+                    # Spoilage compounds daily
+                    total_spoilage_pct = 0
+                    current_qty = quantity_kg
+                    for day in range(days):
+                        day_age = days_since_harvest + day
+                        day_spoilage_rate = current_spoilage_rate
+                        
+                        # Accelerate spoilage as it ages
+                        if day_age > 7:
+                            day_spoilage_rate *= 1.5
+                        if day_age > 14:
+                            day_spoilage_rate *= 2.0
+                        if day_age > 21:
+                            day_spoilage_rate *= 3.0
+                        
+                        daily_loss = current_qty * (day_spoilage_rate / 100)
+                        current_qty = max(0, current_qty - daily_loss)
+                    
+                    remaining_qty = current_qty
                     
                     revenue_later = (p_price * remaining_qty) - profit_config.transport_cost
                     revenue_now = (current_price * quantity_kg) - profit_config.transport_cost
@@ -919,34 +995,47 @@ class YieldSyncPredictor(SmartFarmingPredictor):
                     net_revenue_later = revenue_later - storage_total
                     profit_gain = net_revenue_later - revenue_now
                     
-                    if profit_gain > best_profit:
+                    # Override decision if spoilage risk is high
+                    if shelf_life_remaining <= 3:
+                        # Critical: Sell immediately regardless of profit
+                        if profit_gain > best_profit or best_decision != "SELL":
+                            best_profit = profit_gain
+                            best_horizon = days
+                            best_price = p_price
+                            best_decision = "SELL"
+                            best_reason = f"URGENT: Only {shelf_life_remaining} days before spoiling! Sell now even if price is low. Expected spoilage loss: {100-remaining_qty/quantity_kg*100:.0f}%"
+                    elif profit_gain > best_profit:
                         best_profit = profit_gain
                         best_horizon = days
                         best_price = p_price
                         
                         price_change_pct = ((p_price - current_price) / current_price) * 100 if current_price > 0 else 0
-                        if profit_gain > (revenue_now * 0.05): # 5% gain threshold
+                        spoilage_loss_pct = (1 - remaining_qty / quantity_kg) * 100
+                        
+                        # Decision logic considering spoilage
+                        if profit_gain > (revenue_now * 0.05) and spoilage_loss_pct < 20: # Good profit, manageable spoilage
                             best_decision = "HOLD" if days < 30 else "STRONG HOLD"
-                            best_reason = f"Price expected to rise {price_change_pct:.1f}% in {label}. Net profit +{profit_gain:.0f} LKR."
-                        elif profit_gain < (revenue_now * -0.02): # 2% loss threshold
+                            best_reason = f"Price +{price_change_pct:.1f}% in {label}. Net profit +{profit_gain:.0f} LKR. Spoilage: {spoilage_loss_pct:.0f}%"
+                        elif profit_gain < (revenue_now * -0.02) or spoilage_loss_pct > 30: # Loss or high spoilage
                             best_decision = "SELL"
-                            best_reason = f"Price drop or high costs expected. Selling now prevents loss."
+                            best_reason = f"High spoilage risk ({spoilage_loss_pct:.0f}%) or price drop expected. Sell now to minimize loss."
                         else:
                             best_decision = "WAIT"
-                            best_reason = "Market stable. No significant advantage to holding."
+                            best_reason = f"Market stable. Spoilage risk: {spoilage_loss_pct:.0f}%. Monitor closely."
                 else:
                     # Prediction failed - use current price as fallback
                     predictions[label] = round(current_price, 2)
             except Exception as e:
                 predictions[label] = round(current_price, 2)
         
-        # Get Demand Predictions (Optional)
+        # Get Demand Predictions (Optional - may fail if models missing)
         try:
              for days, label in zip(horizons, labels):
                  d_pred = self.predict_demand(df, crop, days)
-                 if 'predicted_quantity' in d_pred:
+                 if 'predicted_quantity' in d_pred and 'error' not in d_pred:
                      demand_predictions[label] = round(d_pred['predicted_quantity'], 1)
-        except Exception:
+        except Exception as e:
+            # Silently skip demand predictions if models are missing
             pass
         
         # Calculate trend signal (Rising/Steady/Falling)
@@ -964,14 +1053,30 @@ class YieldSyncPredictor(SmartFarmingPredictor):
             else:
                 trend_signal = "Steady →"
         
+        # Check if it's currently harvest season for this crop
+        current_month = current_date.month
+        harvest_months = HARVEST_PERIODS.get(crop, [])
+        in_harvest_season = current_month in harvest_months
+        
+        harvest_context = ""
+        if in_harvest_season:
+            harvest_context = f"⚠️ Currently in {crop} harvest season. Prices typically lower due to high supply."
+        elif current_month in [(m % 12) + 1 for m in harvest_months]:  # Month after harvest
+            harvest_context = f"✓ Post-harvest period. Supply decreasing, prices may rise."
+        
         return {
             'decision': best_decision,
             'confidence': 85.0 if best_decision != "WAIT" else 60.0,
             'reasoning': best_reason,
-            'expected_profit_per_kg': (best_profit / quantity_kg) if quantity_kg > 0 and best_profit != float('-inf') else 0,
-            'expected_profit_total': best_profit if best_profit != float('-inf') else 0,
+            'urgency_warning': urgency_warning,
+            'harvest_context': harvest_context,
+            'days_since_harvest': days_since_harvest,
+            'shelf_life_remaining': max(0, shelf_life_remaining),
+            'perishability': perishability,
+            'expected_profit_per_kg': (best_profit / quantity_kg) if quantity_kg > 0 and best_profit != -float('inf') else 0,
+            'expected_profit_total': best_profit if best_profit != -float('inf') else 0,
             'best_hold_days': best_horizon,
-            'best_time': f"in {best_horizon} days",
+            'best_time': f"in {best_horizon} days" if best_horizon > 0 else "now",
             'best_price': best_price,
             'current_price': current_price,
             'predictions': predictions,

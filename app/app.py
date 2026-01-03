@@ -41,6 +41,17 @@ st.markdown("""
     .decision-hold { background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 1rem; border-radius: 0.5rem; }
     .decision-wait { background-color: #fff3e0; border-left: 4px solid #ff9800; padding: 1rem; border-radius: 0.5rem; }
     .next-date-box { background-color: #e3f2fd; border: 2px solid #1976D2; padding: 1rem; border-radius: 0.5rem; text-align: center; }
+    
+    /* Fix info/warning/success text visibility */
+    div[data-testid="stAlert"] > div {
+        color: #1f1f1f !important;
+    }
+    div[data-testid="stAlert"] p {
+        color: #1f1f1f !important;
+    }
+    div[data-testid="stAlert"] strong {
+        color: #000000 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -797,8 +808,27 @@ else:
         # Quantity
         quantity_kg = st.number_input(lang['quantity'], min_value=1, max_value=10000, value=100, step=10)
         
-        # Days since harvest
-        days_since_harvest = st.number_input(lang['days_harvest'], min_value=0, max_value=365, value=0, step=1)
+        # Not yet harvested checkbox
+        not_yet_harvested = st.checkbox(
+            "Not Yet Harvested",
+            value=False,
+            help="Check this if the crop has not been harvested yet (for planning purposes)"
+        )
+        
+        # Days since harvest input
+        days_since_harvest = st.number_input(
+            lang['days_harvest'], 
+            min_value=0,
+            max_value=365, 
+            value=0, 
+            step=1,
+            help="Enter 0 for fresh harvest, or number of days since the crop was harvested.",
+            disabled=not_yet_harvested
+        )
+        
+        # Set to -1 internally if not yet harvested
+        if not_yet_harvested:
+            days_since_harvest = -1
         
         get_rec = st.button(f"🎯 {lang['get_recommendation']}", type="primary", use_container_width=True)
     
@@ -859,6 +889,14 @@ else:
         # Display Results
         current_price = result.get('current_price', 0)
         
+        # URGENT WARNINGS - Show first if critical
+        urgency_warning = result.get('urgency_warning', '')
+        if urgency_warning:
+            if '🔴 URGENT' in urgency_warning or 'CRITICAL' in urgency_warning:
+                st.error(urgency_warning)
+            elif '⚠️ WARNING' in urgency_warning:
+                st.warning(urgency_warning)
+        
         # Decision display
         decision = result['decision']
         if 'SELL' in decision:
@@ -889,9 +927,14 @@ else:
             st.metric(lang['confidence'], f"{result.get('confidence',0):.0f}%")
         
         with col3:
-            # Trend Signal
-            trend = result.get('trend_signal', 'Steady →')
-            st.metric("Price Trend", trend)
+            # Shelf Life Remaining
+            shelf_life = result.get('shelf_life_remaining', 'N/A')
+            perishability = result.get('perishability', 'Medium')
+            if isinstance(shelf_life, int):
+                shelf_emoji = '🟢' if shelf_life > 7 else ('🟡' if shelf_life > 3 else '🔴')
+                st.metric(f"{shelf_emoji} Shelf Life", f"{shelf_life} days", f"({perishability})")
+            else:
+                st.metric("Shelf Life", "N/A")
         
         with col4:
             profit = result.get('expected_profit_per_kg', 0)
@@ -900,27 +943,53 @@ else:
         with col5:
             st.metric("Total Profit", f"{result.get('expected_profit_total',0):.0f} LKR")
         
-        # Seasonal & Festival Context
-        season_info = result.get('season', {})
-        festivals = result.get('upcoming_festivals', [])
+        # Harvest & Seasonal Context
+        st.markdown("---")
+        context_row1 = st.columns([1, 1])
         
-        if season_info or festivals:
+        with context_row1[0]:
+            # Harvest season context
+            harvest_ctx = result.get('harvest_context', '')
+            if harvest_ctx:
+                if '⚠️' in harvest_ctx:
+                    st.warning(harvest_ctx)
+                else:
+                    st.success(harvest_ctx)
+            
+            # Season info
+            season_info = result.get('season', {})
+            if season_info:
+                season_name = season_info.get('name', 'N/A')
+                season_desc = season_info.get('description', '')
+                st.info(f"🌾 **Growing Season:** {season_name} - {season_desc}")
+        
+        with context_row1[1]:
+            # Crop age tracking
+            days_harvest = result.get('days_since_harvest', 0)
+            if days_harvest == -1:
+                # Not yet harvested
+                st.info(f"🌱 **Planning Mode:** Not yet harvested")
+            elif days_harvest > 0:
+                age_emoji = '🆕' if days_harvest <= 3 else ('⏰' if days_harvest <= 7 else '⚠️')
+                st.info(f"{age_emoji} **Crop Age:** {days_harvest} days since harvest")
+            else:
+                # Just harvested today
+                st.success(f"🆕 **Fresh Harvest:** Just harvested today!")
+            
+            # Trend Signal
+            trend = result.get('trend_signal', 'Steady →')
+            st.info(f"📈 **Price Trend:** {trend}")
+        
+        # Festival Context
+        festivals = result.get('upcoming_festivals', [])
+        if festivals:
             st.markdown("---")
-            context_cols = st.columns([1, 2])
-            
-            with context_cols[0]:
-                if season_info:
-                    season_name = season_info.get('name', 'N/A')
-                    season_desc = season_info.get('description', '')
-                    st.info(f"🌾 **Season:** {season_name} ({season_desc})")
-            
-            with context_cols[1]:
-                if festivals:
-                    festival_text = " | ".join([
-                        f"🎉 **{f['name']}** in {f['days_until']} days" 
-                        for f in festivals[:2]  # Show max 2 festivals
-                    ])
-                    st.warning(festival_text)
+            st.markdown("### 🎉 Upcoming Festivals")
+            festival_text = " | ".join([
+                f"**{f['name']}** in {f['days_until']} days (Impact: {f['impact']})"
+                for f in festivals[:2]  # Show max 2 festivals
+            ])
+            st.warning(festival_text)
         
         st.markdown("---")
         
@@ -953,6 +1022,10 @@ else:
                 fig.add_trace(go.Bar(x=[f"{d}d" for d in days], y=volumes, marker_color='#1976D2', text=[f"{v:.1f}" for v in volumes], textposition='outside'))
                 fig.update_layout(xaxis_title="Horizon", yaxis_title="Volume (MT)", template='plotly_white', height=350)
                 st.plotly_chart(fig, use_container_width=True)
+            else:
+                # No demand data available
+                st.warning(f"⚠️ Demand forecast unavailable for {crop}. Models not trained due to insufficient historical data.")
+                st.info("💡 Price forecast is still accurate and can be used for decisions.")
         
         # Reasoning
         st.markdown(f"""
