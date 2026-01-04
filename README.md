@@ -2,7 +2,6 @@
 
 > AI-powered price forecasting and market recommendations for Sri Lankan farmers
 
-![Dashboard](docs/images/dashboard.png)
 
 ---
 
@@ -13,19 +12,16 @@
 - **Multi-horizon forecasting** - Predictions for 1 week, 2 weeks, 1 month, 2 months, 3 months
 - **Profit-aware recommendations** - HOLD, SELL, or NEUTRAL based on economic analysis
 
-![Prediction Results](docs/images/prediction.png)
+
 
 ###  Data Management
 
 **Add Daily Data** - Manual entry or bulk upload (CSV/Excel)
 
-![Add Data](docs/images/add_data.png)
+
 
 **View Historical Data** - Price trends, charts, and data table
 
-![View Data](docs/images/view_data.png)
-
-![Price Trends](docs/images/price_trends.png)
 
 ---
 
