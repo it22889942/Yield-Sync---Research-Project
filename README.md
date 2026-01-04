@@ -20,7 +20,7 @@
 
 
 
-**View Historical Data** - Price trends, charts, and data tabl
+**View Historical Data** - Price trends, charts, and data table
 
 
 ---
