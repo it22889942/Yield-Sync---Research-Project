@@ -791,8 +791,27 @@ else:
         st.markdown("---")
         st.subheader("Prediction Settings")
         
+        # Date Selection
         if last_data_date:
             st.info(f"📅 Data available up to: **{last_data_date}**")
+            
+            # Determine the max selectable date (today or last data date, whichever is earlier)
+            today = datetime.now().date()
+            max_date = min(today, last_data_date)
+            
+            # Default to the last data date
+            default_date = last_data_date
+            
+            selected_date = st.date_input(
+                "📅 Select Date for Prediction",
+                value=default_date,
+                min_value=df['Date'].min().date() if not df.empty else today,
+                max_value=max_date,
+                help="Select the date for which you want predictions. Data must be available up to this date."
+            )
+        else:
+            selected_date = datetime.now().date()
+            st.warning("No data available. Please add data first.")
         
         # Crop selection
         crop = st.selectbox(
@@ -832,59 +851,61 @@ else:
         
         get_rec = st.button(f"🎯 {lang['get_recommendation']}", type="primary", use_container_width=True)
     
-    # Show current data status
-    current_sys_date = datetime.now().date()
-    days_lag = (current_sys_date - last_data_date).days if last_data_date else 0
-    
-    status_icon = "✅" if days_lag <= 0 else "⚠️"
-    status_msg = "Data is Up-to-Date" if days_lag <= 0 else f"Data Lagging by {days_lag} Days"
-    status_bg = "#e8f5e9" if days_lag <= 0 else "#ffebee"
-    status_border = "#4caf50" if days_lag <= 0 else "#f44336"
-
-    st.markdown(f"""
-    <div style="background-color: {status_bg}; border: 2px solid {status_border}; padding: 1rem; border-radius: 0.5rem; text-align: center; margin-bottom: 1rem;">
-        <h3 style="margin: 0; color: #333;">{status_icon} {status_msg}</h3>
-        <p style="margin: 0.5rem 0 0 0; color: #555;">
-            Today: <strong>{current_sys_date}</strong> | Data Available Up To: <strong>{last_data_date.strftime('%Y-%m-%d')}</strong>
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Show selected date info
+    if 'selected_date' in locals():
+        st.markdown(f"""
+        <div style="background-color: #e3f2fd; border: 2px solid #1976D2; padding: 1rem; border-radius: 0.5rem; text-align: center; margin-bottom: 1rem;">
+            <h3 style="margin: 0; color: #333;">📅 Prediction Date</h3>
+            <p style="margin: 0.5rem 0 0 0; color: #555;">
+                Making predictions for: <strong style="color: #1976D2; font-size: 1.2rem;">{selected_date.strftime('%Y-%m-%d')}</strong>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.markdown("")
     
     # Logic to show results if button clicked OR valid result in session
     if get_rec:
-        # Get real historical data
-        crop_df = df[(df['item'] == crop) & (df['market'] == market)].sort_values('Date')
-        
-        if crop_df.empty:
-            st.warning(f"No specific data for {crop} in {market}. Using average of all markets.")
-            crop_df = df[df['item'] == crop].groupby('Date').agg({'price':'mean', 'volume_MT':'mean'}).reset_index().sort_values('Date')
-        
-        # Need at least some history
-        if crop_df.empty:
-            st.error("No historical data found for this crop.")
+        # Validate selected date has data
+        if selected_date > last_data_date:
+            st.error(f"❌ No data available for {selected_date.strftime('%Y-%m-%d')}. Latest data is from {last_data_date.strftime('%Y-%m-%d')}.")
         else:
-             # Take last 30 days
-             recent = crop_df.tail(60)
-             price_history = recent['price'].tolist()
-             volume_history = recent['volume_MT'].tolist()
-             
-             with st.spinner('🔄 Analyzing with real historical data...'):
-                result = predictor.get_recommendation(
-                    crop=crop,
-                    price_history=price_history,
-                    volume_history=volume_history,
-                    current_date=datetime.combine(last_data_date, datetime.min.time()),
-                    quantity_kg=quantity_kg,
-                    days_since_harvest=days_since_harvest
-                )
-                st.session_state['last_result'] = result
-                st.session_state['last_crop'] = crop
-                
+            # Get real historical data up to selected date
+            crop_df = df[(df['item'] == crop) & (df['market'] == market) & (df['Date'] <= pd.Timestamp(selected_date))].sort_values('Date')
+            
+            if crop_df.empty:
+                st.warning(f"No specific data for {crop} in {market}. Using average of all markets.")
+                crop_df = df[(df['item'] == crop) & (df['Date'] <= pd.Timestamp(selected_date))].groupby('Date').agg({'price':'mean', 'volume_MT':'mean'}).reset_index().sort_values('Date')
+            
+            # Need at least some history
+            if crop_df.empty:
+                st.error("No historical data found for this crop up to the selected date.")
+            else:
+                 # Take last 60 days before selected date
+                 recent = crop_df.tail(60)
+                 price_history = recent['price'].tolist()
+                 volume_history = recent['volume_MT'].tolist()
+                 
+                 with st.spinner('🔄 Analyzing with real historical data...'):
+                    result = predictor.get_recommendation(
+                        crop=crop,
+                        price_history=price_history,
+                        volume_history=volume_history,
+                        current_date=datetime.combine(selected_date, datetime.min.time()),
+                        quantity_kg=quantity_kg,
+                        days_since_harvest=days_since_harvest
+                    )
+                    st.session_state['last_result'] = result
+                    st.session_state['last_crop'] = crop
+                    st.session_state['last_selected_date'] = selected_date
     
     if 'last_result' in st.session_state:
         result = st.session_state['last_result']
+        
+        # Show which date the prediction is for
+        prediction_date = st.session_state.get('last_selected_date', last_data_date)
+        if prediction_date:
+            st.info(f"📊 **Showing predictions based on data up to:** {prediction_date.strftime('%Y-%m-%d')}")
         
         # Display Results
         current_price = result.get('current_price', 0)
