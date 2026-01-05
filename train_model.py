@@ -19,16 +19,16 @@ from sentence_transformers import SentenceTransformer
 warnings.filterwarnings('ignore')
 sns.set(style='whitegrid')
 
-# ---------------------------
+
 # Step 1 - Folder Setup
-# ---------------------------
+
 os.makedirs('models', exist_ok=True)
 os.makedirs('outputs/plots', exist_ok=True)
 os.makedirs('embeddings', exist_ok=True)
 
-# ---------------------------
+
 # Step 2 - Load Datasets
-# ---------------------------
+
 LABOUR_DATA_PATH = 'data/Labour_Expanded_clean_generated.xlsx'
 EQUIP_DATA_PATH  = 'data/Equipment_Final_clean_generated.xlsx'
 
@@ -57,9 +57,9 @@ for col in ['Equipment_Type', 'For_Crop', 'Season',
 print("✅ Labour Data:", DF_labour.shape)
 print("✅ Equipment Data:", DF_equip.shape)
 
-# ---------------------------
+
 # Step 3 - Feature Engineering
-# ---------------------------
+
 # Labour cleaning
 for col in ['Labour_Type', 'Season', 'Crop_Type', 'Skill_Level', 'Location']:
     DF_labour[col] = DF_labour[col].astype(str).str.strip()
@@ -90,7 +90,7 @@ DF_labour['request_text'] = (
     DF_labour['Location']
 )
 
-# ⚠️ IMPORTANT FIX:
+# IMPORTANT FIX:
 # Request-style text for EQUIPMENT – now includes Equipment_Type as well
 DF_equip['request_text'] = (
     DF_equip['Equipment_Type'] + ' ' +            # <-- added
@@ -112,9 +112,9 @@ equipment_label_col = 'Equipment_Type'
 
 print("✅ Feature Engineering Done")
 
-# ---------------------------
+
 # Step 4 - Shared TF-IDF Vectorizer
-# ---------------------------
+
 # Fit TF-IDF over ALL request_text (labour + equipment)
 all_text = pd.concat(
     [DF_labour['request_text'], DF_equip['request_text']],
@@ -133,9 +133,9 @@ print("🔤 Fitting shared TF-IDF on labour + equipment text ...")
 vectorizer.fit(all_text)
 print("✅ TF-IDF Vocabulary Size:", len(vectorizer.vocabulary_))
 
-# ---------------------------
+
 # Step 5 - Prepare LABOUR Data for Classification
-# ---------------------------
+
 X_labour_text = DF_labour['request_text'].values
 y_labour      = DF_labour[labour_label_col].values
 
@@ -156,9 +156,9 @@ X_labour_test  = vectorizer.transform(X_labour_test_text)
 print(f"🧩 Labour - Training Samples: {X_labour_train.shape[0]}, Test Samples: {X_labour_test.shape[0]}")
 print("✅ Labour TF-IDF Matrices:", X_labour_train.shape, X_labour_test.shape)
 
-# ---------------------------
+
 # Step 6 - Model Comparison (Labour Type)
-# ---------------------------
+
 models = {
     'RandomForest': RandomForestClassifier(
         n_estimators=400, random_state=42, n_jobs=-1
@@ -193,9 +193,9 @@ plt.ylabel('Mean Accuracy')
 plt.savefig('outputs/plots/model_comparison_labour.png')
 plt.close()
 
-# ---------------------------
+
 # Step 7 - Train Best Model (Labour Type)
-# ---------------------------
+
 best_name_labour = res_df.iloc[0]['model']
 best_labour_clf = models[best_name_labour]
 best_labour_clf.fit(X_labour_train, y_labour_train)
@@ -211,9 +211,9 @@ joblib.dump(
     f'models/best_labour_model_{best_name_labour}.joblib'
 )
 
-# ---------------------------
+
 # Step 8 - Evaluate Labour Model
-# ---------------------------
+
 y_labour_pred = best_labour_clf.predict(X_labour_test)
 print("✅ Labour Test Accuracy:", round(accuracy_score(y_labour_test, y_labour_pred), 3))
 print(

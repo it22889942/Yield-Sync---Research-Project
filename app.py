@@ -8,9 +8,7 @@ from sentence_transformers import SentenceTransformer, util
 
 app = Flask(__name__)
 
-# -----------------------------
 # Load model and components
-# -----------------------------
 # Make sure this path matches what you saved in train.py
 model_data = joblib.load('models/complete_recommendation_model.joblib')
 
@@ -28,9 +26,9 @@ semantic_model = SentenceTransformer(model_data['embedding_model_name'])
 
 print("✅ Models Loaded Successfully")
 
-# -----------------------------
+
 # Routes
-# -----------------------------
+
 @app.route('/')
 def index():
     """Render the frontend HTML page."""
@@ -47,9 +45,9 @@ def recommend():
     if not query.strip():
         return jsonify({'error': 'Empty query'}), 400
 
-    # -----------------------------------
+    
     # 1. Predict Labour Type & Equipment
-    # -----------------------------------
+
     qv = vectorizer.transform([query])
 
     labour_pred_id = labour_clf.predict(qv)[0]
@@ -58,9 +56,9 @@ def recommend():
     labour_label = le_labour.inverse_transform([labour_pred_id])[0]
     equip_label = le_equip.inverse_transform([equip_pred_id])[0]
 
-    # -----------------------------------
+    
     # 2. Semantic embedding of the query
-    # -----------------------------------
+
     query_emb = semantic_model.encode(query, convert_to_tensor=True)
 
     # 3. Labour recommendations
