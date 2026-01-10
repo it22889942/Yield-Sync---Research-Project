@@ -41,34 +41,28 @@ tailored for Sri Lankan farmers.
 
 ## System Architecture – Crop Price & Demand Prediction Module
 
-```mermaid
-flowchart LR
 
-A[Data Collection] --> B[Data Processing]
-B --> C[Machine Learning Models]
-C --> D[Decision Logic]
-D --> E[Output to Farmer]
+---
 
-A --> A1[Crop Price Data]
-A --> A2[Market Volume / Demand Data]
-A --> A3[Seasonal Calendar<br/>(Maha / Yala)]
-A --> A4[Festival Dates]
-A --> A5[Weather Data]
+### If Mermaid is not allowed (backup simple diagram)
 
-B --> B1[Data Cleaning]
-B --> B2[Feature Engineering]
-B --> B3[Season & Festival Encoding]
+```md
+Data Collection
+   |
+   v
+Data Processing
+   |
+   v
+ML Models
+(Price + Demand Prediction)
+   |
+   v
+Decision Logic
+(SELL / HOLD)
+   |
+   v
+Farmer Output
 
-C --> C1[Price Prediction Model]
-C --> C2[Demand Forecasting Model]
-
-D --> D1[SELL Recommendation]
-D --> D2[HOLD Recommendation]
-
-E --> E1[Predicted Future Price]
-E --> E2[Demand Trend]
-E --> E3[Reason for Decision]
-  
 
 ---
 
