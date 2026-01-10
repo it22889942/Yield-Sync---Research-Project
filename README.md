@@ -30,12 +30,12 @@ tailored for Sri Lankan farmers.
 ---
 
 ## ⚙️Key Features
-- Future crop price prediction
-- Market demand forecasting (Rising / Stable / Falling)
-- Season-aware modeling (Maha and Yala)
-- Festival-based price adjustment
-- Clear SELL or HOLD recommendation
-- Short explanation for each decision
+- 📈Future crop price prediction
+- 📊Market demand forecasting (Rising / Stable / Falling)
+- 🌱Season-aware modeling (Maha and Yala)
+- 🎉Festival-based price adjustment
+- ✅Clear SELL or HOLD recommendation
+- 📝Short explanation for each decision
 
 ---
 
@@ -54,11 +54,11 @@ Farmer Output
 
 ---
 ## 🛠️Technologies Used
-- Programming Language: Python  
-- Machine Learning: scikit-learn  
-- Data Processing: Pandas, NumPy  
-- Visualization: Matplotlib  
-- Backend: Flask  
-- Version Control: Git and GitHub  
+- 🐍Programming Language: Python  
+- 🤖Machine Learning: scikit-learn  
+- 📂Data Processing: Pandas, NumPy  
+- 📉Visualization: Matplotlib  
+- 🌐Backend: Flask  
+- 🔁Version Control: Git and GitHub  
 
 ---
