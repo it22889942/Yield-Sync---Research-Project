@@ -49,25 +49,31 @@ tailored for Sri Lankan farmers.
 
 ---
 
-## System Architecture – Crop Price & Demand Prediction
+System Architecture – Crop Price & Demand Prediction
 
----
-```md
 Data Collection
-   |
-   v
+    |
+    v
 Data Processing
-   |
-   v
+    |
+    v
 ML Models
 (Price + Demand Prediction)
-   |
-   v
+    |
+    v
 Decision Logic
 (SELL / HOLD)
-   |
-   v
+    |
+    v
 Farmer Output
 
-```md
+---
+## Technologies Used
+- Programming Language: Python  
+- Machine Learning: scikit-learn  
+- Data Processing: Pandas, NumPy  
+- Visualization: Matplotlib  
+- Backend: Flask  
+- Version Control: Git and GitHub  
+
 ---
