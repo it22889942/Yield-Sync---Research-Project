@@ -49,8 +49,8 @@ tailored for Sri Lankan farmers.
 
 ---
 
-System Architecture – Crop Price & Demand Prediction
-
+## System Architecture – Crop Price & Demand Prediction
+```md
 Data Collection
     |
     v
