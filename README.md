@@ -10,7 +10,7 @@
 
 # Crop Price & Demand Prediction Module (SELL / HOLD Decision)
 
-## Overview
+## 🔍Overview
 This module is part of the **Yield Sync – Smart Farm Assistant** project.
 It helps farmers decide the best time to sell their crops by predicting
 future crop prices and market demand, and then providing a clear
@@ -22,14 +22,14 @@ to reduce crop wastage and improve farmer income.
 
 ---
 
-## Novelty
+## ✨Novelty
 The key novelty of this module is the **joint prediction of crop price and market demand**
 and converting these predictions into a **simple, actionable SELL or HOLD decision**
 tailored for Sri Lankan farmers.
 
 ---
 
-## Key Features
+## ⚙️Key Features
 - Future crop price prediction
 - Market demand forecasting (Rising / Stable / Falling)
 - Season-aware modeling (Maha and Yala)
@@ -39,17 +39,7 @@ tailored for Sri Lankan farmers.
 
 ---
 
-## Technologies Used
-- Programming Language: Python  
-- Machine Learning: scikit-learn  
-- Data Processing: Pandas, NumPy  
-- Visualization: Matplotlib  
-- Backend: Flask  
-- Version Control: Git and GitHub  
-
----
-
-## System Architecture – Crop Price & Demand Prediction
+## 🏗️System Architecture – Crop Price & Demand Prediction
 <pre>
 Data Collection
    ↓
@@ -63,7 +53,7 @@ Farmer Output
 </pre>
 
 ---
-## Technologies Used
+## 🛠️Technologies Used
 - Programming Language: Python  
 - Machine Learning: scikit-learn  
 - Data Processing: Pandas, NumPy  
