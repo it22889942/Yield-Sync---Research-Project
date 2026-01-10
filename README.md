@@ -39,26 +39,36 @@ tailored for Sri Lankan farmers.
 
 ---
 
-## High-Level Architecture
-1. Data Collection  
-   - Crop price data (manually collected)  
-   - Market volume and demand data (manually collected)  
-   - Seasonal and festival calendar data  
-   - Weather-related indicators  
+## System Architecture – Crop Price & Demand Prediction Module
 
-2. Data Processing  
-   - Data cleaning and normalization  
-   - Feature engineering for season and festivals  
+```mermaid
+flowchart LR
 
-3. Machine Learning Models  
-   - Price prediction model  
-   - Demand forecasting model  
-   - Decision logic for SELL / HOLD  
+A[Data Collection] --> B[Data Processing]
+B --> C[Machine Learning Models]
+C --> D[Decision Logic]
+D --> E[Output to Farmer]
 
-4. Output  
-   - Predicted future price  
-   - Demand trend  
-   - Final recommendation with explanation  
+A --> A1[Crop Price Data]
+A --> A2[Market Volume / Demand Data]
+A --> A3[Seasonal Calendar<br/>(Maha / Yala)]
+A --> A4[Festival Dates]
+A --> A5[Weather Data]
+
+B --> B1[Data Cleaning]
+B --> B2[Feature Engineering]
+B --> B3[Season & Festival Encoding]
+
+C --> C1[Price Prediction Model]
+C --> C2[Demand Forecasting Model]
+
+D --> D1[SELL Recommendation]
+D --> D2[HOLD Recommendation]
+
+E --> E1[Predicted Future Price]
+E --> E2[Demand Trend]
+E --> E3[Reason for Decision]
+  
 
 ---
 
