@@ -10,7 +10,7 @@
 
 # Crop Price & Demand Prediction Module (SELL / HOLD Decision)
 
-## Project Overview
+## Overview
 This module is part of the **Yield Sync – Smart Farm Assistant** project.
 It helps farmers decide the best time to sell their crops by predicting
 future crop prices and market demand, and then providing a clear
@@ -52,7 +52,7 @@ tailored for Sri Lankan farmers.
 ## System Architecture – Crop Price & Demand Prediction
 
 ---
-
+```md
 Data Collection
    |
    v
