@@ -39,14 +39,20 @@ tailored for Sri Lankan farmers.
 
 ---
 
-## System Architecture – Crop Price & Demand Prediction Module
-
+## Technologies Used
+- Programming Language: Python  
+- Machine Learning: scikit-learn  
+- Data Processing: Pandas, NumPy  
+- Visualization: Matplotlib  
+- Backend: Flask  
+- Version Control: Git and GitHub  
 
 ---
 
-### If Mermaid is not allowed (backup simple diagram)
+## System Architecture – Crop Price & Demand Prediction
 
-```md
+---
+
 Data Collection
    |
    v
@@ -65,15 +71,3 @@ Farmer Output
 
 
 ---
-
-## Technologies Used
-- Programming Language: Python  
-- Machine Learning: scikit-learn  
-- Data Processing: Pandas, NumPy  
-- Visualization: Matplotlib  
-- Backend: Flask  
-- Version Control: Git and GitHub  
-
----
-
-## Folder Structure
