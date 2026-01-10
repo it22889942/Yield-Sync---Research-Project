@@ -50,22 +50,17 @@ tailored for Sri Lankan farmers.
 ---
 
 ## System Architecture – Crop Price & Demand Prediction
-```md
+<pre>
 Data Collection
-    |
-    v
+   ↓
 Data Processing
-    |
-    v
-ML Models
-(Price + Demand Prediction)
-    |
-    v
-Decision Logic
-(SELL / HOLD)
-    |
-    v
+   ↓
+ML Models (Price + Demand Prediction)
+   ↓
+Decision Logic (SELL / HOLD)
+   ↓
 Farmer Output
+</pre>
 
 ---
 ## Technologies Used
