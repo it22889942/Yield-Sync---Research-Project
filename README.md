@@ -8,7 +8,7 @@
 
 
 
-# Crop Price & Demand Prediction Module (SELL / HOLD Decision)
+# 4) Crop Price & Demand Prediction Module (SELL / HOLD Decision)
 
 ## 🔍Overview
 This module is part of the **Yield Sync – Smart Farm Assistant** project.
