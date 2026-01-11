@@ -3,7 +3,9 @@
 
 
 
-#
+
+# 3) IoT ML Based Smart Fertilizer Recommendation
+
 ## 🔍 Overview
 
 This module is part of the YieldSync – Smart Farm Assistant project.
@@ -13,6 +15,48 @@ The system is designed for Sri Lankan agriculture and supports crops such as ric
 
 ---
 
+## ✨ Novelty
+
+The key novelty of this module is the integration of real-time IoT-based soil sensing with machine learning to provide crop-specific fertilizer recommendation, yield prediction, and fertilizer quantity calculation in a single automated workflow, which is not available in traditional fertilizer advisory methods.
+
+---
+
+## ⚙️ Key Features
+
+- 🌱 Real-time soil data collection using IoT sensors
+- 🧪 Soil pH and NPK-based fertilizer recommendation
+- 🌾 Crop and growth-stage specific analysis
+- 📈 Yield prediction per acre using ML models
+- ⚖️ Fertilizer quantity calculation based on field size
+- 📱 Simple, farmer-friendly mobile interface
+  
+---
+
+## 🏗️ System Architecture – Fertilizer Recommendation
+<pre>
+Soil Data Collection (IoT Sensors)
+  ↓
+Data Processing & Validation
+  ↓
+ML Model (Fertilizer & Yield Prediction)
+  ↓
+Quantity Calculation Logic
+  ↓
+Farmer Recommendation Output
+</pre>
+
+---
+## 🛠️ Technologies Used
+
+- 🐍 Programming Language: Python
+- 🤖 Machine Learning: scikit-learn
+- 📂 Data Processing: Pandas, NumPy
+- 📡 IoT Hardware: 7-in-1 Soil Sensor, ESP8266
+- 🌐 Backend: Flask (API tested using Postman)
+- 📱 UI Design: Figma
+- 🔁 Version Control: Git and GitHub
+
+---
 
 
 # 4) Crop Price & Demand Prediction (SELL / HOLD Decision)
