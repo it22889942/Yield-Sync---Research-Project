@@ -66,15 +66,15 @@ The key novelty of this module is the **integration of both equipment and labour
 ## 🏗️ System Architecture – Equipment & Labour Hiring
 <pre> 
   Farmer Service Request   
-  ↓ 
+          ↓ 
   Location-Based Matching   
-  ↓ 
+          ↓ 
   Availability & Booking Validation   
-  ↓ 
+          ↓ 
   Service Provider Notification   
-  ↓ 
+          ↓ 
   Booking Confirmation   
-  ↓ 
+          ↓ 
   Service Completion & Feedback 
 </pre>
 
