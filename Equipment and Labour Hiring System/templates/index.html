@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YIELD ML Engine</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .search-section {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+        }
+
+        .search-form {
+            display: flex;
+            gap: 10px;
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 15px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .search-btn {
+            padding: 15px 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .search-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .search-btn:active {
+            transform: translateY(0);
+        }
+
+        .message {
+            text-align: center;
+            padding: 20px;
+            color: white;
+            font-size: 18px;
+            margin-top: 20px;
+        }
+
+        .results-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        .result-column {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .result-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #f0f0f0;
+        }
+
+        .icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .labour-icon {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .equipment-icon {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .result-header h2 {
+            font-size: 1.5em;
+            color: #333;
+        }
+
+        .predicted-type {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .equipment-predicted {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .recommendations-title {
+            font-size: 1.2em;
+            color: #555;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+
+        .recommendation-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .recommendation-card:hover {
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .equipment-card {
+            border-left-color: #f5576c;
+        }
+
+        .card-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+        }
+
+        .card-detail {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .detail-label {
+            color: #666;
+            font-weight: 500;
+        }
+
+        .detail-value {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .score-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        .equipment-score {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+            font-size: 16px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @media (max-width: 968px) {
+            .results-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .rating-stars {
+            color: #ffd700;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌾 YIELD ML Engine</h1>
+            <p>Smart Agricultural Resource Recommendation System</p>
+        </div>
+
+        <div class="search-section">
+            <form class="search-form" id="queryForm">
+                <input 
+                    type="text" 
+                    class="search-input" 
+                    id="queryInput" 
+                    placeholder="e.g. need harvester for paddy in Yala season" 
+                    required
+                >
+                <button type="submit" class="search-btn">Search</button>
+            </form>
+        </div>
+
+        <div id="messages" class="message"></div>
+
+        <div id="results" class="results-container hidden">
+            <!-- Left Column - Labour -->
+            <div class="result-column">
+                <div class="result-header">
+                    <div class="icon labour-icon">👷</div>
+                    <h2>Labour Resources</h2>
+                </div>
+                
+                <div class="predicted-type" id="predictedLabour">
+                    Predicted Labour Type: Loading...
+                </div>
+
+                <div class="recommendations-title">Top Recommendations</div>
+                <div id="labourRecommendations"></div>
+            </div>
+
+            <!-- Right Column - Equipment -->
+            <div class="result-column">
+                <div class="result-header">
+                    <div class="icon equipment-icon">🚜</div>
+                    <h2>Equipment Resources</h2>
+                </div>
+                
+                <div class="predicted-type equipment-predicted" id="predictedEquipment">
+                    Predicted Equipment Type: Loading...
+                </div>
+
+                <div class="recommendations-title">Top Recommendations</div>
+                <div id="equipmentRecommendations"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('queryForm');
+        const input = document.getElementById('queryInput');
+        const resultsDiv = document.getElementById('results');
+        const messagesDiv = document.getElementById('messages');
+        const predictedLabourDiv = document.getElementById('predictedLabour');
+        const predictedEquipmentDiv = document.getElementById('predictedEquipment');
+        const labourRecommendationsDiv = document.getElementById('labourRecommendations');
+        const equipmentRecommendationsDiv = document.getElementById('equipmentRecommendations');
+
+        function createStars(rating) {
+            const fullStars = Math.floor(rating);
+            const halfStar = rating % 1 >= 0.5;
+            let stars = '⭐'.repeat(fullStars);
+            if (halfStar) stars += '½';
+            return stars;
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const query = input.value.trim();
+            if (!query) return;
+
+            messagesDiv.textContent = "🔍 Searching for recommendations...";
+            resultsDiv.classList.add('hidden');
+            labourRecommendationsDiv.innerHTML = "";
+            equipmentRecommendationsDiv.innerHTML = "";
+
+            try {
+                const res = await fetch('/recommend', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query, top_k: 5 })
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    messagesDiv.textContent = "❌ " + (data.error || "Error from server.");
+                    return;
+                }
+
+                messagesDiv.textContent = "";
+                resultsDiv.classList.remove('hidden');
+
+                // Update predicted types
+                predictedLabourDiv.textContent = "Predicted Labour Type: " + (data.predicted_labour_type || "N/A");
+                predictedEquipmentDiv.textContent = "Predicted Equipment Type: " + (data.predicted_equipment_type || "N/A");
+
+                // Render Labour Recommendations
+                if (data.labour_recommendations && data.labour_recommendations.length > 0) {
+                    data.labour_recommendations.forEach(rec => {
+                        const card = document.createElement('div');
+                        card.className = 'recommendation-card';
+                        card.innerHTML = `
+                            <div class="card-title">${rec.Name || 'Unknown'}</div>
+                            <div class="card-detail">
+                                <span class="detail-label">Location:</span>
+                                <span class="detail-value">${rec.Location || 'N/A'}</span>
+                            </div>
+                            <div class="card-detail">
+                                <span class="detail-label">Labour Type:</span>
+                                <span class="detail-value">${rec.Labour_Type || 'N/A'}</span>
+                            </div>
+                            <div class="card-detail">
+                                <span class="detail-label">Season:</span>
+                                <span class="detail-value">${rec.Season || 'N/A'}</span>
+                            </div>
+                            <div class="card-detail">
+                                <span class="detail-label">Crop Type:</span>
+                                <span class="detail-value">${rec.Crop_Type || 'N/A'}</span>
+                            </div>
+                            <div class="card-detail">
+                                <span class="detail-label">Hourly Rate:</span>
+                                <span class="detail-value">LKR ${rec.Hourly_Rate !== undefined ? rec.Hourly_Rate : 'N/A'}</span>
+                            </div>
+                            <div class="card-detail">
+                                <span class="detail-label">Rating:</span>
+                                <span class="detail-value rating-stars">${rec.Rating !== undefined ? createStars(rec.Rating) + ' (' + rec.Rating + ')' : 'N/A'}</span>
+                            </div>
+                            <span class="score-badge">Match Score: ${rec.score !== undefined ? rec.score.toFixed(3) : 'N/A'}</span>
+                        `;
+                        labourRecommendationsDiv.appendChild(card);
+                    });
+                } else {
+                    labourRecommendationsDiv.innerHTML = '<div class="no-results">No labour matches found</div>';
+                }
+
+                // Render Equipment Recommendations
+                const hasEquipmentFlag = (typeof data.has_equipment_matches !== "undefined")
+                    ? data.has_equipment_matches
+                    : true;
+
+                if (!hasEquipmentFlag || !data.equipment_recommendations || data.equipment_recommendations.length === 0) {
+                    equipmentRecommendationsDiv.innerHTML = '<div class="no-results">No equipment matches found</div>';
+                } else {
+                    data.equipment_recommendations.forEach(rec => {
+                        const card = document.createElement('div');
+                        card.className = 'recommendation-card equipment-card';
+                        card.innerHTML = `
+                            <div class="card-title">${rec.Equipment_Type || 'Unknown'}</div>
+                            <div class="card-detail">
+                                <span class="detail-label">For Crop:</span>
+                                <span class="detail-value">${rec.For_Crop || 'N/A'}</span>
+                            </div>
+                            <div class="card-detail">
+                                <span class="detail-label">Season:</span>
+                                <span class="detail-value">${rec.Season || 'N/A'}</span>
+                            </div>
+                            <div class="card-detail">
+                                <span class="detail-label">District:</span>
+                                <span class="detail-value">${rec.Nearest_Major_District || 'N/A'}</span>
+                            </div>
+                            <div class="card-detail">
+                                <span class="detail-label">Condition:</span>
+                                <span class="detail-value">${rec.Condition || 'N/A'}</span>
+                            </div>
+                            <div class="card-detail">
+                                <span class="detail-label">Hourly Rate:</span>
+                                <span class="detail-value">LKR ${rec.Hourly_Rate_LKR !== undefined ? rec.Hourly_Rate_LKR : 'N/A'}</span>
+                            </div>
+                            <div class="card-detail">
+                                <span class="detail-label">Rating:</span>
+                                <span class="detail-value rating-stars">${rec.Rating !== undefined ? createStars(rec.Rating) + ' (' + rec.Rating + ')' : 'N/A'}</span>
+                            </div>
+                            <span class="score-badge equipment-score">Match Score: ${rec.score !== undefined ? rec.score.toFixed(3) : 'N/A'}</span>
+                        `;
+                        equipmentRecommendationsDiv.appendChild(card);
+                    });
+                }
+
+            } catch (err) {
+                console.error(err);
+                messagesDiv.textContent = "❌ Error fetching results. Check server and try again.";
+            }
+        });
+    </script>
+</body>
+</html>
