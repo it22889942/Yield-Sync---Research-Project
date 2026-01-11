@@ -1,0 +1,16 @@
+flask
+pandas
+numpy
+scikit-learn
+xgboost
+lightgbm
+sentence-transformers
+joblib
+matplotlib
+seaborn
+certifi==2025.8.3
+charset-normalizer==3.4.3
+colorama==0.4.6
+idna==3.10
+requests==2.32.5
+urllib3==2.5.0
