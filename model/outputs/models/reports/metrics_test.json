@@ -1,0 +1,65 @@
+{
+  "best_model": "GradientBoosting",
+  "cv_table": [
+    {
+      "model": "GradientBoosting",
+      "cv_macro_f1_mean": 0.6608177465809046,
+      "cv_macro_f1_std": 0.05905369284185824,
+      "test_macro_f1": 0.7103352062072391,
+      "test_accuracy": 0.77,
+      "best_params": "{\"clf__learning_rate\": 0.2525192044349383, \"clf__max_depth\": 2, \"clf__n_estimators\": 152, \"clf__subsample\": 0.6923575302488596}"
+    },
+    {
+      "model": "ExtraTrees",
+      "cv_macro_f1_mean": 0.6680177222125041,
+      "cv_macro_f1_std": 0.023264549816293507,
+      "test_macro_f1": 0.6739037888463176,
+      "test_accuracy": 0.74,
+      "best_params": "{\"clf__max_depth\": 10, \"clf__max_features\": \"log2\", \"clf__min_samples_leaf\": 1, \"clf__min_samples_split\": 8, \"clf__n_estimators\": 400}"
+    },
+    {
+      "model": "RandomForest",
+      "cv_macro_f1_mean": 0.666789301906949,
+      "cv_macro_f1_std": 0.022072850076330145,
+      "test_macro_f1": 0.6364529011040639,
+      "test_accuracy": 0.72,
+      "best_params": "{\"clf__max_depth\": 14, \"clf__max_features\": \"sqrt\", \"clf__min_samples_leaf\": 4, \"clf__min_samples_split\": 9, \"clf__n_estimators\": 301}"
+    },
+    {
+      "model": "SVM_RBF",
+      "cv_macro_f1_mean": 0.651753847175842,
+      "cv_macro_f1_std": 0.016612212213225994,
+      "test_macro_f1": 0.6221426888181926,
+      "test_accuracy": 0.7,
+      "best_params": "{\"clf__C\": 1.4949386065204184, \"clf__gamma\": \"auto\", \"clf__kernel\": \"rbf\"}"
+    },
+    {
+      "model": "KNN",
+      "cv_macro_f1_mean": 0.6558252368914638,
+      "cv_macro_f1_std": 0.03172962959201792,
+      "test_macro_f1": 0.6215963350109691,
+      "test_accuracy": 0.71,
+      "best_params": "{\"clf__n_neighbors\": 4, \"clf__p\": 2, \"clf__weights\": \"distance\"}"
+    }
+  ],
+  "test_accuracy": 0.77,
+  "test_macro_f1": 0.7103352062072391,
+  "generated_at": "2025-11-01T16:02:40.887502Z",
+  "classes": [
+    "Beetroot",
+    "Onion",
+    "Radish",
+    "chickpea",
+    "maize",
+    "rice"
+  ],
+  "features": [
+    "N",
+    "P",
+    "K",
+    "PH",
+    "Temperature",
+    "Humidity",
+    "Rainfall"
+  ]
+}
