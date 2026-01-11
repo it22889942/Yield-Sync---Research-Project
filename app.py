@@ -24,6 +24,24 @@ DF_equip = model_data['DF_equipment']
 
 semantic_model = SentenceTransformer(model_data['embedding_model_name'])
 
+# Extract unique locations for filtering
+labour_locations = set()
+if 'Location' in DF_labour.columns:
+    labour_locations = set(DF_labour['Location'].dropna().astype(str).str.strip().unique())
+
+equip_locations = set()
+if 'Nearest_Major_District' in DF_equip.columns:
+    equip_locations = set(DF_equip['Nearest_Major_District'].dropna().astype(str).str.strip().unique())
+
+# Extract unique locations for filtering
+labour_locations = set()
+if 'Location' in DF_labour.columns:
+    labour_locations = set(DF_labour['Location'].dropna().astype(str).str.strip().unique())
+
+equip_locations = set()
+if 'Nearest_Major_District' in DF_equip.columns:
+    equip_locations = set(DF_equip['Nearest_Major_District'].dropna().astype(str).str.strip().unique())
+
 print("✅ Models Loaded Successfully")
 
 
