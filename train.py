@@ -1,23 +1,14 @@
-# train.py
-# =========================
-# Fertilizer Recommendation + Yield Prediction Training Pipeline
-# - Multi-task: Classification (FertilizerType) & Regression (Yield_kg_per_acre)
-# - Robust column auto-detection + preprocessing
-# - CV model selection, metrics, plots, artifacts
-# - Saves all outputs directly into outputs/<timestamp> (no subfolders)
-# =========================
-
 import argparse
 import json
 import os
 import re
 import textwrap
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import joblib
 import matplotlib
-matplotlib.use("Agg")  # <--- critical: non-GUI backend to avoid Tk errors
+matplotlib.use("Agg")  # non-GUI backend (fix Tk errors)
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -168,6 +159,57 @@ def pick_regression_scorer():
     except Exception:
         return "neg_mean_squared_error"       # fallback on older versions
 
+# =========================
+# Accuracy images 
+# =========================
+def plot_train_vs_test_bars(values: Dict[str, float], title: str, ylabel: str, out_path: str):
+    keys = list(values.keys())
+    vals = [values[k] for k in keys]
+    plt.figure(figsize=(6, 4))
+    plt.bar(keys, vals)
+    for i, v in enumerate(vals):
+        plt.text(i, v, f"{v:.4f}", ha="center", va="bottom", fontsize=9)
+    plt.ylim(0, max(1.0, max(vals) * 1.15))
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.grid(True, axis="y", alpha=0.25)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=180)
+    plt.close()
+
+def plot_model_metric_comparison(df: pd.DataFrame, metric_col: str, title: str, ylabel: str, out_path: str):
+    if metric_col not in df.columns or df.shape[0] == 0:
+        return
+    d = df.copy().sort_values(metric_col, ascending=True)
+    plt.figure(figsize=(7, max(3.8, 0.45 * len(d))))
+    plt.barh(d.index.astype(str), d[metric_col].values)
+    plt.xlabel(ylabel)
+    plt.title(title)
+    plt.grid(True, axis="x", alpha=0.25)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=180)
+    plt.close()
+
+# =========================
+# detect leakage shortcut columns
+# =========================
+def detect_deterministic_categorical_features(df: pd.DataFrame, cat_cols: List[str], y_col: str) -> List[str]:
+    """
+    If a categorical feature maps to exactly 1 label always (ex: Crop -> Fertilizer_Type),
+    it is a leakage shortcut. Return those columns.
+    """
+    bad = []
+    for c in cat_cols:
+        if c not in df.columns or y_col not in df.columns:
+            continue
+        try:
+            nunq = df.groupby(c)[y_col].nunique()
+            if len(nunq) > 0 and nunq.max() == 1:
+                bad.append(c)
+        except Exception:
+            pass
+    return bad
+
 # --------- Main training ---------
 
 def main():
@@ -213,7 +255,6 @@ def main():
     else:
         raise ValueError("Unsupported file type. Use .xlsx, .xls, or .csv")
 
-    original_cols = list(df.columns)
     df = normalize_columns(df)
 
     # Detect columns
@@ -225,7 +266,10 @@ def main():
     wanted_inputs = ["temperature","ph","nitrogen","phosphorous","potassium","soil","crop","growth_stage"]
     input_cols = [col_res[c] for c in wanted_inputs if c in col_res]
     if not input_cols:
-        raise ValueError("Could not detect any input columns. Expected some of: Temperature, PH, Nitrogen, Phosphorous, Potassium, Soil, Crop, Growth_Stage.")
+        raise ValueError(
+            "Could not detect any input columns. Expected some of: "
+            "Temperature, PH, Nitrogen, Phosphorous, Potassium, Soil, Crop, Growth_Stage."
+        )
 
     # Targets
     clf_target = col_res.get("fertilizer", None)
@@ -240,7 +284,7 @@ def main():
     numeric_cols = [c for c in input_cols if slugify(c) in numeric_like or pd.api.types.is_numeric_dtype(df[c])]
     cat_cols = [c for c in input_cols if c not in numeric_cols]
 
-    # Preprocessors
+    # Preprocessors (base)
     num_tf = Pipeline(steps=[
         ("impute", SimpleImputer(strategy="median")),
         ("scale", StandardScaler())
@@ -261,28 +305,74 @@ def main():
     clf_results = {}
     if clf_target and clf_target in df.columns:
         df_clf = df.dropna(subset=[clf_target]).copy()
+
+        # Base features
         Xc = df_clf[input_cols]
         yc = df_clf[clf_target].astype(str)
 
+        # ✅ FIX: remove deterministic categorical leakage features ONLY for classification
+        leakage_cols = detect_deterministic_categorical_features(df_clf, cat_cols, clf_target)
+        if leakage_cols:
+            with open(os.path.join(outdir, "leakage_features_removed.txt"), "w") as f:
+                f.write("Removed leakage features (deterministic mapping to target):\n")
+                for lc in leakage_cols:
+                    f.write(f"- {lc}\n")
+
+            input_cols_clf = [c for c in input_cols if c not in leakage_cols]
+            if len(input_cols_clf) == 0:
+                raise ValueError(
+                    "All classification input features became leakage/removed. "
+                    "Please improve dataset (same crop with multiple fertilizers under different conditions)."
+                )
+
+            numeric_cols_clf = [c for c in numeric_cols if c in input_cols_clf]
+            cat_cols_clf = [c for c in cat_cols if c in input_cols_clf]
+
+            # classification-only preprocessor
+            num_tf_clf = Pipeline(steps=[
+                ("impute", SimpleImputer(strategy="median")),
+                ("scale", StandardScaler())
+            ])
+            cat_tf_clf = Pipeline(steps=[
+                ("impute", SimpleImputer(strategy="most_frequent")),
+                ("onehot", OneHotEncoder(handle_unknown="ignore"))
+            ])
+            preprocessor_clf = ColumnTransformer(
+                transformers=[
+                    ("num", num_tf_clf, numeric_cols_clf),
+                    ("cat", cat_tf_clf, cat_cols_clf)
+                ],
+                remainder="drop"
+            )
+
+            Xc = df_clf[input_cols_clf]
+
+        else:
+            input_cols_clf = input_cols
+            numeric_cols_clf = numeric_cols
+            cat_cols_clf = cat_cols
+            preprocessor_clf = preprocessor
+
         Xc_train, Xc_test, yc_train, yc_test = train_test_split(
-            Xc, yc, test_size=args.test_size, random_state=42, stratify=yc if yc.nunique() > 1 else None
+            Xc, yc, test_size=args.test_size, random_state=42,
+            stratify=yc if yc.nunique() > 1 else None
         )
 
         classifiers = {
             "logreg": (
-                Pipeline(steps=[("prep", preprocessor),
+                Pipeline(steps=[("prep", preprocessor_clf),
                                 ("clf", LogisticRegression(max_iter=500))]),
                 {"clf__C": [0.1, 1.0, 5.0]}
             ),
             "rf": (
-                Pipeline(steps=[("prep", preprocessor),
+                Pipeline(steps=[("prep", preprocessor_clf),
                                 ("clf", RandomForestClassifier(random_state=42))]),
                 {"clf__n_estimators": [150, 300],
                  "clf__max_depth": [None, 8, 16],
                  "clf__min_samples_split": [2, 5]}
             ),
             "gbc": (
-                Pipeline(steps=[("prep", preprocessor),
+                Pipeline(steps=[("prep", preprocessor_clf),
                                 ("clf", GradientBoostingClassifier(random_state=42))]),
                 {"clf__n_estimators": [150, 300],
                  "clf__learning_rate": [0.05, 0.1],
@@ -316,9 +406,44 @@ def main():
         clf_metrics_df = pd.DataFrame(clf_results).T
         clf_metrics_df.to_csv(os.path.join(outdir, "classification_metrics.csv"))
 
+        # Save metrics as PNG + comparison charts
+        clf_metrics_png_df = clf_metrics_df.reset_index().rename(columns={"index": "model"}).copy()
+        save_table_as_png(clf_metrics_png_df.round(4), os.path.join(outdir, "classification_metrics.png"),
+                          title="Classification Metrics (all models)")
+        plot_model_metric_comparison(
+            clf_metrics_df, "test_accuracy",
+            "Model Comparison (Classification) - Test Accuracy",
+            "Accuracy", os.path.join(outdir, "model_comparison_accuracy.png")
+        )
+        plot_model_metric_comparison(
+            clf_metrics_df, "test_f1_macro",
+            "Model Comparison (Classification) - Test F1 Macro",
+            "F1 Macro", os.path.join(outdir, "model_comparison_f1_macro.png")
+        )
+
         # Detailed report & plots for best model
         if best_clf_est is not None:
             ypred = best_clf_est.predict(Xc_test)
+
+            # Train vs Test accuracy images
+            ypred_train = best_clf_est.predict(Xc_train)
+            train_acc = accuracy_score(yc_train, ypred_train)
+            test_acc = accuracy_score(yc_test, ypred)
+            plot_train_vs_test_bars(
+                {"Train": float(train_acc), "Test": float(test_acc)},
+                "Train vs Test Accuracy (Best Classifier)",
+                "Accuracy",
+                os.path.join(outdir, "train_vs_test_accuracy.png")
+            )
+            train_f1 = f1_score(yc_train, ypred_train, average="macro")
+            test_f1 = f1_score(yc_test, ypred, average="macro")
+            plot_train_vs_test_bars(
+                {"Train": float(train_f1), "Test": float(test_f1)},
+                "Train vs Test F1 Macro (Best Classifier)",
+                "F1 Macro",
+                os.path.join(outdir, "train_vs_test_f1_macro.png")
+            )
+
             report = classification_report(yc_test, ypred, output_dict=True)
             report_df = pd.DataFrame(report).T
             report_df.to_csv(os.path.join(outdir, "classification_report.csv"))
@@ -345,7 +470,7 @@ def main():
 
                     aucs = []
                     for i in range(len(classes)):
-                        proba_i = yproba[:, i] if not isinstance(yproba, list) else yproba[i][:, 1]
+                        proba_i = yproba[:, i]
                         try:
                             aucs.append(roc_auc_score(y_true_bin[:, i], proba_i))
                         except Exception:
@@ -357,7 +482,7 @@ def main():
 
                     precisions, r_axis = [], np.linspace(0,1,200)
                     for i in range(len(classes)):
-                        proba_i = yproba[:, i] if not isinstance(yproba, list) else yproba[i][:, 1]
+                        proba_i = yproba[:, i]
                         p, r, _ = precision_recall_curve(y_true_bin[:, i], proba_i)
                         precisions.append(np.interp(r_axis, r[::-1], p[::-1]))
                     if len(precisions) > 0:
@@ -386,12 +511,15 @@ def main():
 
             # Feature importance (tree-based)
             try:
-                ohe = best_clf_est.named_steps["prep"].named_transformers_["cat"].named_steps["onehot"]
-                num_names = numeric_cols
-                cat_names = list(ohe.get_feature_names_out(cat_cols)) if len(cat_cols) else []
-                feat_names = num_names + cat_names
                 model = best_clf_est.named_steps.get("clf", None)
-                if model is not None:
+                prep = best_clf_est.named_steps.get("prep", None)
+                if model is not None and prep is not None:
+                    num_names = list(numeric_cols_clf)
+                    cat_names = []
+                    if len(cat_cols_clf) > 0:
+                        ohe = prep.named_transformers_["cat"].named_steps["onehot"]
+                        cat_names = list(ohe.get_feature_names_out(cat_cols_clf))
+                    feat_names = num_names + cat_names
                     feature_importance_plot(
                         model, feat_names,
                         os.path.join(outdir, "feature_importance_classification.png"),
@@ -454,11 +582,10 @@ def main():
             rmse = safe_rmse(yr_test, yhat)
             r2 = r2_score(yr_test, yhat)
 
-            # Convert CV score to RMSE for readability
             best_cv = float(gs.best_score_)  # negative error
             if scoring_name == "neg_root_mean_squared_error":
                 cv_rmse = -best_cv
-            else:  # neg_mean_squared_error
+            else:
                 cv_rmse = float(np.sqrt(-best_cv))
 
             reg_results[name] = {
@@ -477,6 +604,21 @@ def main():
         reg_metrics_df = pd.DataFrame(reg_results).T
         reg_metrics_df.to_csv(os.path.join(outdir, "regression_metrics.csv"))
 
+        # Save regression metrics as PNG + model comparison charts
+        reg_metrics_png_df = reg_metrics_df.reset_index().rename(columns={"index": "model"}).copy()
+        save_table_as_png(reg_metrics_png_df.round(4), os.path.join(outdir, "regression_metrics.png"),
+                          title="Regression Metrics (all models)")
+        plot_model_metric_comparison(
+            reg_metrics_df, "test_rmse",
+            "Model Comparison (Regression) - Test RMSE",
+            "RMSE", os.path.join(outdir, "model_comparison_rmse.png")
+        )
+        plot_model_metric_comparison(
+            reg_metrics_df, "test_r2",
+            "Model Comparison (Regression) - Test R²",
+            "R²", os.path.join(outdir, "model_comparison_r2.png")
+        )
+
         if best_reg_est is not None:
             yhat = best_reg_est.predict(Xr_test)
             resid = yr_test - yhat
@@ -490,6 +632,25 @@ def main():
             plt.savefig(os.path.join(outdir, "residuals_regression.png"), dpi=180)
             plt.close()
 
+            # Train vs Test RMSE/R2 images
+            yhat_train = best_reg_est.predict(Xr_train)
+            train_rmse = safe_rmse(yr_train, yhat_train)
+            test_rmse = safe_rmse(yr_test, yhat)
+            plot_train_vs_test_bars(
+                {"Train": float(train_rmse), "Test": float(test_rmse)},
+                "Train vs Test RMSE (Best Regressor)",
+                "RMSE (lower is better)",
+                os.path.join(outdir, "train_vs_test_rmse.png")
+            )
+            train_r2 = r2_score(yr_train, yhat_train)
+            test_r2 = r2_score(yr_test, yhat)
+            plot_train_vs_test_bars(
+                {"Train": float(train_r2), "Test": float(test_r2)},
+                "Train vs Test R² (Best Regressor)",
+                "R²",
+                os.path.join(outdir, "train_vs_test_r2.png")
+            )
+
             try:
                 plot_learning_curve(
                     best_reg_est, Xr_train, yr_train,
@@ -501,12 +662,15 @@ def main():
                 pass
 
             try:
-                ohe = best_reg_est.named_steps["prep"].named_transformers_["cat"].named_steps["onehot"]
-                num_names = numeric_cols
-                cat_names = list(ohe.get_feature_names_out(cat_cols)) if len(cat_cols) else []
-                feat_names = num_names + cat_names
                 model = best_reg_est.named_steps.get("reg", None)
-                if model is not None:
+                prep = best_reg_est.named_steps.get("prep", None)
+                if model is not None and prep is not None:
+                    num_names = list(numeric_cols)
+                    cat_names = []
+                    if len(cat_cols) > 0:
+                        ohe = prep.named_transformers_["cat"].named_steps["onehot"]
+                        cat_names = list(ohe.get_feature_names_out(cat_cols))
+                    feat_names = num_names + cat_names
                     feature_importance_plot(
                         model, feat_names,
                         os.path.join(outdir, "feature_importance_regression.png"),
@@ -532,24 +696,37 @@ def main():
         Artifacts generated in: {outdir}
 
         Files:
+          - column_detection.json
+          - summary.json
+
+          - leakage_features_removed.txt             (NEW, if leakage detected)
+
           - classification_metrics.csv
+          - classification_metrics.png
+          - model_comparison_accuracy.png
+          - model_comparison_f1_macro.png
+          - train_vs_test_accuracy.png
+          - train_vs_test_f1_macro.png
+
           - classification_report.csv
           - classification_report.png
           - confusion_matrix.png
-          - precision_recall_macro.png            (if probabilities available)
+          - precision_recall_macro.png              (if probabilities available)
           - learning_curve_classification.png
-          - feature_importance_classification.png (if tree-based)
+          - feature_importance_classification.png   (if tree-based)
+          - best_classifier.joblib                  (if classification trained)
 
           - regression_metrics.csv
+          - regression_metrics.png
+          - model_comparison_rmse.png
+          - model_comparison_r2.png
+          - train_vs_test_rmse.png
+          - train_vs_test_r2.png
+
           - residuals_regression.png
           - learning_curve_regression.png
-          - feature_importance_regression.png     (if tree-based)
-
-          - best_classifier.joblib                (if classification trained)
-          - best_regressor.joblib                 (if regression trained)
-
-          - column_detection.json
-          - summary.json
+          - feature_importance_regression.png       (if tree-based)
+          - best_regressor.joblib                   (if regression trained)
         """).strip())
 
     print(f"✅ Done. Artifacts saved to: {outdir}")

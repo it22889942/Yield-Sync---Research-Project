@@ -1,6 +1,6 @@
 {
-  "timestamp": "2025-12-24T09:12:51.229254Z",
-  "yield_kg_per_acre": 57.29,
+  "timestamp": "2026-01-06T03:18:42.748525Z",
+  "yield_kg_per_acre": 56.08,
   "inputs_used": [
     "temperature",
     "ph",
@@ -12,11 +12,11 @@
     "growth_stage"
   ],
   "inputs_payload": {
-    "temperature": 28,
-    "ph": 6.4,
-    "nitrogen": 90,
-    "phosphorous": 40,
-    "potassium": 35,
+    "temperature": 28.1,
+    "ph": 5.1,
+    "nitrogen": 64,
+    "phosphorous": 193,
+    "potassium": 187,
     "crop": "paddy",
     "growth_stage": "flowering"
   }
