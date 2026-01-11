@@ -34,8 +34,63 @@ it is designed to be lightweight, accessible, and easy to use for farmers.
 
 ---
 
+# 2) Location-Based Equipment & Labour Hiring System
 
+## 🔍 Overview
 
+This module is part of the **YieldSync – Smart Farm Assistant** project.  
+It helps farmers easily find and hire **agricultural equipment and labour services** based on their **location**, availability, and service requirements using a digital platform.
+
+The system is designed for Sri Lankan agriculture, where equipment and labour hiring is mainly handled through informal verbal communication or brokers. This module improves efficiency by reducing delays, cost uncertainty, and reliability issues through a structured hiring process.
+
+---
+
+## ✨ Novelty
+
+The key novelty of this module is the **integration of both equipment and labour hiring into a single system** with **location-based matching**, availability tracking, and transparent booking management, which is not available in traditional agricultural hiring practices.
+
+---
+
+## ⚙️ Key Features
+
+- 🚜 Agricultural equipment hiring (tractors, harvesters, sprayers, etc.)
+- 👨‍🌾 Labour hiring (machine operators and field workers)
+- 📍 Location-based service matching
+- 📅 Availability checking and booking management
+- 🔔 Booking notifications and confirmations
+- ⭐ Ratings and reviews for service providers
+- 📱 Simple, farmer-friendly interface
+
+---
+
+## 🏗️ System Architecture – Equipment & Labour Hiring
+<pre> 
+  Farmer Service Request   
+  ↓ 
+  Location-Based Matching   
+  ↓ 
+  Availability & Booking Validation   
+  ↓ 
+  Service Provider Notification   
+  ↓ 
+  Booking Confirmation   
+  ↓ 
+  Service Completion & Feedback 
+</pre>
+
+---
+
+## 🛠️ Technologies Used
+
+- 🐍 Programming Language: Python  
+- 🤖 Machine Learning: scikit-learn (matching & recommendation logic)  
+- 📂 Data Processing: Pandas, NumPy  
+- 🌐 Backend: Flask (API tested using Postman)  
+- 🗄️ Database: MySQL / Firebase  
+- 📱 UI Design: Figma  
+- 🔁 Version Control: Git and GitHub  
+
+---
 
 # 3) IoT ML Based Smart Fertilizer Recommendation
 
