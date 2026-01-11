@@ -3,8 +3,15 @@
 
 
 
+#
+## 🔍 Overview
 
+This module is part of the YieldSync – Smart Farm Assistant project.
+It helps farmers select the correct fertilizer type, estimate the expected yield per acre, and calculate the exact fertilizer quantity required for their field using real-time soil data and machine learning.
 
+The system is designed for Sri Lankan agriculture and supports crops such as rice, beetroot, radish, and red onion, considering soil conditions and crop growth stages to improve productivity and reduce fertilizer misuse.
+
+---
 
 
 
