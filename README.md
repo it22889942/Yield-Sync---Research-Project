@@ -1,1 +1,0 @@
-# Yield-Sync---Research-Project
