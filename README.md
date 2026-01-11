@@ -28,9 +28,9 @@ it is designed to be lightweight, accessible, and easy to use for farmers.
 ---
 
 ## ⚙️Key Features
-Weather and soil based crop reccomendation
-Soil parameter analysis
-Weather forecast
+- Weather and soil based crop reccomendation
+- Soil parameter analysis
+- Weather forecast
 
 
 
