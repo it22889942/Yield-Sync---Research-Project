@@ -32,7 +32,7 @@ it is designed to be lightweight, accessible, and easy to use for farmers.
 - Soil parameter analysis
 - Weather forecast
 
-
+---
 
 
 
