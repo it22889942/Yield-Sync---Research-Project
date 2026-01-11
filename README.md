@@ -31,6 +31,31 @@ it is designed to be lightweight, accessible, and easy to use for farmers.
 - Weather and soil based crop reccomendation
 - Soil parameter analysis
 - Weather forecast
+- customer Feedback for reccomendation
+
+---
+
+## 🏗️ System Architecture – Crop Advisory
+<pre>
+Soil Data Collection
+  ↓
+Data Processing & Validation (with soil data and current weather patterns)
+  ↓
+ML Model (Crop Prediction)
+  ↓
+Farmer Recommendation Output (Suitable crops for current conditions)
+</pre>
+
+---
+
+## 🛠️ Technologies Used
+
+- 🐍 Programming Language: Python
+- 🤖 Machine Learning: scikit-learn
+- 📂 Data Processing: Pandas, NumPy
+- 🌐 Backend: Flask (API tested using Postman)
+- 📱 UI Design: Figma
+- 🔁 Version Control: Git and GitHub
 
 ---
 
