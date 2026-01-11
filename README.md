@@ -6,8 +6,8 @@ The application integrates multiple agriculture-related functionalities, includi
 
 **Main Functions**
 - Intelligent Crop Advisory Tool
-- Fertilizer reccomondation
 - Equipment & Labour hiring
+- Fertilizer reccomondation
 - Crop Price & Demand Prediction
 
 ---
