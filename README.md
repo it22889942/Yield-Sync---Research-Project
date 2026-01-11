@@ -1,14 +1,14 @@
 # Yield-Sync---Research-Project
 
 **Yield Sync – Smart Farm Assistant**
-Yield Sync is a mobile-based agriculture support application designed to assist farmers in making informed and timely farming decisions through digital technology. 
+- Yield Sync is a mobile-based agriculture support application designed to assist farmers in making informed and timely farming decisions through digital technology. 
 The application integrates multiple agriculture-related functionalities, including crop advisory, fertilizer recommendation, Equipment & Labour hiring, and market prediction, within a single platform.
 
 **Main Functions**
-Intelligent Crop Advisory Tool
-Fertilizer reccomondation
-Equipment & Labour hiring
-Crop Price & Demand Prediction
+- Intelligent Crop Advisory Tool
+- Fertilizer reccomondation
+- Equipment & Labour hiring
+- Crop Price & Demand Prediction
 
 ---
 
