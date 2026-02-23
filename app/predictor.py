@@ -1,6 +1,16 @@
 """
-Smart Farming Predictor - Production Module
-Integrates Price & Demand Forecasting from new.ipynb and demand_forecasting.ipynb
+YieldSync Price Forecasting - Inference Module
+==============================================
+This module provides price prediction capabilities for Sri Lankan crops.
+
+Usage:
+    from predictor import YieldSyncPredictor
+    
+    predictor = YieldSyncPredictor()
+    result = predictor.predict_price(data_df, crop='Rice', days_ahead=7, market='Colombo')
+    
+Author: YieldSync Research Team
+License: MIT
 """
 
 import os
@@ -13,330 +23,235 @@ from dataclasses import dataclass
 import warnings
 warnings.filterwarnings('ignore')
 
-@dataclass
-class ProfitConfig:
-    """Configuration for profit calculation"""
-    transport_cost: float = 0.0  # LKR/kg
-    storage_cost: float = 0.0    # LKR/kg/day
-    spoilage_rate: float = 0.0   # %/day
-
-# TensorFlow
+# =============================================================================
+# OPTIONAL IMPORTS (graceful degradation if not installed)
+# =============================================================================
 try:
     from tensorflow.keras.models import load_model
     from sklearn.preprocessing import MinMaxScaler
     TENSORFLOW_AVAILABLE = True
 except ImportError:
     TENSORFLOW_AVAILABLE = False
+    print("Warning: TensorFlow not available. LSTM models will not work.")
 
-# Import crop-market mapping for per-market model support
+# Import configuration
 try:
-    from config import CROP_MARKETS
-    HAS_CROP_MARKETS = True
+    from config import CROP_MARKETS, TARGET_CROPS, FORECAST_HORIZONS, MODEL_RMSE, PERISHABILITY
 except ImportError:
-    CROP_MARKETS = None
-    HAS_CROP_MARKETS = False
-
-
-
-class SmartFarmingPredictor:
-    """
-    Production predictor integrating:
-    - Price forecasting (per-crop optimized LSTM/RF/LightGBM)
-    - Demand forecasting (per-crop optimized LSTM/RF/LightGBM)
-    - Decision recommendations with confidence scoring
-    
-    Model Configuration (from notebooks):
-    - Rice: LSTM (60-day consecutive)
-    - Beetroot: RandomForest (7-day consecutive)
-    - Radish: RandomForest (90-day consecutive)
-    - Red Onion: LightGBM (45-day consecutive)
-    """
-    
-    # Per-crop configurations - matching notebooks/demand forecasting/demand_forecasting.ipynb
-    # Models stored in models/saved_models/demand forcasting/
-    DEMAND_CONFIG = {
-        'Rice': {
-            'model_type': 'LSTM',
-            'lag_days': 60,
-            'univariate': True,
-            'model_file': 'demand forcasting/demand_Rice_lstm.h5'
-        },
-        'Beetroot': {
-            'model_type': 'RandomForest',
-            'lag_days': 7,
-            'univariate': False,
-            'model_file': 'demand forcasting/demand_Beetroot_rf.pkl'
-        },
-        'Radish': {
-            'model_type': 'RandomForest',
-            'lag_days': 90,
-            'univariate': False,
-            'model_file': 'demand forcasting/demand_Radish_rf.pkl'
-        },
-        'Red Onion': {
-            'model_type': 'LightGBM',
-            'lag_days': 45,
-            'univariate': False,
-            'model_file': 'demand forcasting/demand_Red Onion_lgb.pkl'
-        }
+    # Fallback defaults if config not found
+    CROP_MARKETS = {
+        'Rice': ['Colombo', 'Anuradhapura', 'Dambulla', 'Kandy'],
+        'Beetroot': ['Colombo', 'Dambulla', 'Bandarawela'],
+        'Radish': ['Colombo', 'Dambulla', 'Kandy'],
+        'Red Onion': ['Colombo', 'Dambulla', 'Jaffna']
     }
+    TARGET_CROPS = ['Rice', 'Beetroot', 'Radish', 'Red Onion']
+    FORECAST_HORIZONS = [7, 14, 30]
+    MODEL_RMSE = {'Rice': 15.5, 'Beetroot': 22.3, 'Radish': 12.8, 'Red Onion': 45.2}
+    PERISHABILITY = {'Rice': 180, 'Beetroot': 7, 'Radish': 5, 'Red Onion': 30}
+
+
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
+@dataclass
+class ProfitConfig:
+    """Configuration for profit calculation"""
+    transport_cost: float = 5.0   # LKR/kg
+    storage_cost: float = 1.0     # LKR/kg/day
+    spoilage_rate: float = 1.0    # %/day
+
+
+# =============================================================================
+# MAIN PREDICTOR CLASS
+# =============================================================================
+class YieldSyncPredictor:
+    """
+    Production-ready price predictor for Sri Lankan agricultural commodities.
     
-    # Per-crop configurations - matching notebooks/price forecasting/2_model_comparison.ipynb
-    # Models stored in models/saved_models/price forcasting/
+    Supports:
+    - Multi-horizon forecasting (7, 14, 30 days)
+    - Per-market models (location-specific predictions)
+    - Per-crop optimized models (LSTM/RandomForest/LightGBM)
+    - Confidence intervals for predictions
+    
+    Model Configuration:
+    - Rice: LSTM (60-day lag, univariate)
+    - Beetroot: RandomForest (7-day lag, multivariate with weather)
+    - Radish: RandomForest (90-day lag, multivariate)
+    - Red Onion: LightGBM (45-day lag, multivariate)
+    """
+    
+    # Per-crop model configurations
     PRICE_CONFIG = {
-        'Rice': {
-            'model_type': 'LSTM',
-            'lag_days': 60,
-            'model_file': 'price forcasting/rice_lstm.h5',
-            'scalers_file': 'price forcasting/rice_lstm_scalers.joblib',
-            'config_file': 'price forcasting/rice_config.joblib'
-        },
-        'Beetroot': {
-            'model_type': 'RandomForest',
-            'lag_days': 7,
-            'model_file': 'price forcasting/beetroot_rf.joblib',
-            'config_file': 'price forcasting/beetroot_config.joblib'
-        },
-        'Radish': {
-            'model_type': 'RandomForest',
-            'lag_days': 90,
-            'model_file': 'price forcasting/radish_rf.joblib',
-            'config_file': 'price forcasting/radish_config.joblib'
-        },
-        'Red Onion': {
-            'model_type': 'LightGBM',
-            'lag_days': 45,
-            'model_file': 'price forcasting/red_onion_lgbm.joblib',
-            'config_file': 'price forcasting/red_onion_config.joblib'
-        }
+        'Rice': {'model_type': 'LSTM', 'lag_days': 60, 'univariate': True},
+        'Beetroot': {'model_type': 'RandomForest', 'lag_days': 7, 'univariate': False},
+        'Radish': {'model_type': 'RandomForest', 'lag_days': 90, 'univariate': False},
+        'Red Onion': {'model_type': 'LightGBM', 'lag_days': 45, 'univariate': False}
     }
-
-    # Forecast horizons (matching trainer)
-    FORECAST_HORIZONS = [7, 14, 30, 60, 84]
     
-    # Estimated RMSE for each crop (based on validation set performance)
-    # Used for calculating prediction intervals
-    MODEL_RMSE = {
-        'Rice': 15.5,
-        'Beetroot': 22.3,
-        'Radish': 12.8,
-        'Red Onion': 45.2
-    }
+    # Demand forecasting disabled - no proper dataset available
+    
+    # Weather features for multivariate models
+    WEATHER_FEATURES = ['temp', 'rainfall', 'humidity', 'wind_speed', 'sunshine_hours']
     
     def __init__(self, model_base_dir: str = None):
         """
-        Initialize predictor and load all models.
+        Initialize predictor and load models.
         
         Args:
-            model_base_dir: Path to saved_models directory (containing demand forcasting/ and price forcasting/)
+            model_base_dir: Path to models/saved_models directory.
+                           Auto-detects if not provided.
         """
         if model_base_dir is None:
-            # Auto-detect: look for models/saved_models/ from project root
-            base_dir = os.path.dirname(os.path.abspath(__file__))  # app/
-            project_root = os.path.dirname(base_dir)  # project root
-            model_base_dir = os.path.join(project_root, 'models', 'saved_models')
+            # Auto-detect model path
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            model_base_dir = os.path.join(base_dir, 'models', 'saved_models')
+            
+            # If not found, try parent directory
+            if not os.path.exists(model_base_dir):
+                parent_dir = os.path.dirname(base_dir)
+                model_base_dir = os.path.join(parent_dir, 'models', 'saved_models')
         
         self.model_base_dir = model_base_dir
-        # Store models by crop and horizon: {crop: {horizon: model}}
-        self.demand_models = {}
-        self.price_models = {}
-        self.price_scalers = {}   # Scalers for LSTM: {crop: {horizon: scaler}}
-        self.price_configs = {}   # Config for each price model: {crop: {horizon: config}}
         
-        # Per-market models: {crop: {market: {horizon: model}}}
-        self.price_models_per_market = {}
+        # Model storage (price only - demand forecasting removed)
+        self.price_models = {}          # {crop: {horizon: model}}
+        self.price_models_per_market = {} # {crop: {market: {horizon: model}}}
+        self.price_scalers = {}          # {crop: {horizon: scaler}}
         self.price_scalers_per_market = {}
+        self.price_configs = {}
         self.price_configs_per_market = {}
+        
         self.has_per_market_models = False
         
-        self._load_all_models()
+        # Load all models
+        self._load_models()
     
-    def _load_all_models(self):
-        """Load all multi-horizon models from models/saved_models/ directory."""
-        
-        print("\n" + "="*60)
-        print(f"LOADING MULTI-HORIZON DEMAND MODELS")
-        print("="*60)
-        
-        demand_dir = os.path.join(self.model_base_dir, 'demand forcasting')
-        
-        for crop, config in self.DEMAND_CONFIG.items():
-            self.demand_models[crop] = {}
-            loaded_count = 0
-            
-            for horizon in self.FORECAST_HORIZONS:
-                try:
-                    # Construct filename based on model type
-                    if config['model_type'] == 'LSTM':
-                        filename = f'demand_{crop}_{horizon}day_lstm.h5'
-                    elif config['model_type'] == 'RandomForest':
-                        filename = f'demand_{crop}_{horizon}day_rf.pkl'
-                    elif config['model_type'] == 'LightGBM':
-                        filename = f'demand_{crop}_{horizon}day_lgb.pkl'
-                    else:
-                        continue
-                    
-                    model_path = os.path.join(demand_dir, filename)
-                    
-                    if not os.path.exists(model_path):
-                        # Try without spaces in crop name
-                        filename_alt = filename.replace(' ', '_')
-                        model_path = os.path.join(demand_dir, filename_alt)
-                    
-                    if os.path.exists(model_path):
-                        if config['model_type'] == 'LSTM':
-                            self.demand_models[crop][horizon] = load_model(model_path, compile=False)
-                        else:
-                            self.demand_models[crop][horizon] = joblib.load(model_path)
-                        loaded_count += 1
-                except Exception as e:
-                    print(f"  ✗ {crop} {horizon}day - Error: {str(e)[:40]}")
-            
-            if loaded_count > 0:
-                print(f"✓ {crop:12} ({config['model_type']:12}) - {loaded_count}/5 horizons")
-            else:
-                print(f"✗ {crop:12} - No models found")
-        
-        print("\n" + "="*60)
-        print(f"LOADING MULTI-HORIZON PRICE MODELS")
-        print("="*60)
-        
+    def _load_models(self):
+        """Load all trained models from disk."""
         price_dir = os.path.join(self.model_base_dir, 'price forcasting')
         
-        # First try to load per-market models
-        per_market_count = 0
-        if HAS_CROP_MARKETS and CROP_MARKETS:
-            for crop, markets in CROP_MARKETS.items():
-                self.price_models_per_market[crop] = {}
-                self.price_scalers_per_market[crop] = {}
-                self.price_configs_per_market[crop] = {}
-                
-                config = self.PRICE_CONFIG.get(crop)
-                if not config:
-                    continue
-                    
-                crop_slug = crop.lower().replace(' ', '_')
-                
-                for market in markets:
-                    market_slug = market.lower().replace(' ', '_')
-                    self.price_models_per_market[crop][market] = {}
-                    self.price_scalers_per_market[crop][market] = {}
-                    self.price_configs_per_market[crop][market] = {}
-                    
-                    for horizon in self.FORECAST_HORIZONS:
-                        try:
-                            # Per-market filenames include market slug
-                            if config['model_type'] == 'LSTM':
-                                model_file = f'{crop_slug}_{market_slug}_{horizon}day_lstm.h5'
-                                scalers_file = f'{crop_slug}_{market_slug}_{horizon}day_lstm_scalers.joblib'
-                            elif config['model_type'] == 'RandomForest':
-                                model_file = f'{crop_slug}_{market_slug}_{horizon}day_rf.joblib'
-                                scalers_file = None
-                            elif config['model_type'] == 'LightGBM':
-                                model_file = f'{crop_slug}_{market_slug}_{horizon}day_lgbm.joblib'
-                                scalers_file = None
-                            else:
-                                continue
-                            
-                            config_file = f'{crop_slug}_{market_slug}_{horizon}day_config.joblib'
-                            model_path = os.path.join(price_dir, model_file)
-                            
-                            if os.path.exists(model_path):
-                                if config['model_type'] == 'LSTM':
-                                    self.price_models_per_market[crop][market][horizon] = load_model(model_path, compile=False)
-                                    if scalers_file:
-                                        scalers_path = os.path.join(price_dir, scalers_file)
-                                        if os.path.exists(scalers_path):
-                                            self.price_scalers_per_market[crop][market][horizon] = joblib.load(scalers_path)
-                                else:
-                                    self.price_models_per_market[crop][market][horizon] = joblib.load(model_path)
-                                
-                                config_path = os.path.join(price_dir, config_file)
-                                if os.path.exists(config_path):
-                                    self.price_configs_per_market[crop][market][horizon] = joblib.load(config_path)
-                                
-                                per_market_count += 1
-                        except Exception as e:
-                            pass  # Silent fail for per-market, will fallback to generic
-            
-            if per_market_count > 0:
-                self.has_per_market_models = True
-                print(f"✓ Per-market models: {per_market_count} loaded")
+        print("\n" + "="*50)
+        print("Loading YieldSync Models...")
+        print("="*50)
         
-        # Also load generic (fallback) price models
-        for crop, config in self.PRICE_CONFIG.items():
-            self.price_models[crop] = {}
-            self.price_scalers[crop] = {}
-            self.price_configs[crop] = {}
-            loaded_count = 0
+        # Load per-market price models
+        per_market_count = 0
+        for crop, markets in CROP_MARKETS.items():
+            config = self.PRICE_CONFIG.get(crop)
+            if not config:
+                continue
+            
+            self.price_models_per_market[crop] = {}
+            self.price_scalers_per_market[crop] = {}
+            self.price_configs_per_market[crop] = {}
             
             crop_slug = crop.lower().replace(' ', '_')
             
-            for horizon in self.FORECAST_HORIZONS:
-                try:
-                    # Construct filename based on model type (generic, no market)
-                    if config['model_type'] == 'LSTM':
-                        model_file = f'{crop_slug}_{horizon}day_lstm.h5'
-                        scalers_file = f'{crop_slug}_{horizon}day_lstm_scalers.joblib'
-                    elif config['model_type'] == 'RandomForest':
-                        model_file = f'{crop_slug}_{horizon}day_rf.joblib'
-                        scalers_file = None
-                    elif config['model_type'] == 'LightGBM':
-                        model_file = f'{crop_slug}_{horizon}day_lgbm.joblib'
-                        scalers_file = None
-                    else:
-                        continue
-                    
-                    config_file = f'{crop_slug}_{horizon}day_config.joblib'
-                    
-                    model_path = os.path.join(price_dir, model_file)
-                    
-                    if os.path.exists(model_path):
+            for market in markets:
+                market_slug = market.lower().replace(' ', '_')
+                self.price_models_per_market[crop][market] = {}
+                self.price_scalers_per_market[crop][market] = {}
+                self.price_configs_per_market[crop][market] = {}
+                
+                for horizon in FORECAST_HORIZONS:
+                    model = self._load_single_model(
+                        price_dir, crop, config, horizon, market_slug
+                    )
+                    if model:
+                        self.price_models_per_market[crop][market][horizon] = model
+                        per_market_count += 1
+                        
+                        # Load scalers for LSTM
                         if config['model_type'] == 'LSTM':
-                            self.price_models[crop][horizon] = load_model(model_path, compile=False)
-                            # Load scalers
-                            if scalers_file:
-                                scalers_path = os.path.join(price_dir, scalers_file)
-                                if os.path.exists(scalers_path):
-                                    self.price_scalers[crop][horizon] = joblib.load(scalers_path)
-                        else:
-                            self.price_models[crop][horizon] = joblib.load(model_path)
+                            scalers_file = f'{crop_slug}_{market_slug}_{horizon}day_lstm_scalers.joblib'
+                            scalers_path = os.path.join(price_dir, scalers_file)
+                            if os.path.exists(scalers_path):
+                                self.price_scalers_per_market[crop][market][horizon] = joblib.load(scalers_path)
                         
                         # Load config
+                        config_file = f'{crop_slug}_{market_slug}_{horizon}day_config.joblib'
                         config_path = os.path.join(price_dir, config_file)
                         if os.path.exists(config_path):
-                            self.price_configs[crop][horizon] = joblib.load(config_path)
-                        
-                        loaded_count += 1
-                except Exception as e:
-                    print(f"  ✗ {crop} {horizon}day - Error: {str(e)[:40]}")
-            
-            if loaded_count > 0:
-                print(f"✓ {crop:12} ({config['model_type']:12}) - {loaded_count}/5 horizons (fallback)")
-            else:
-                if not self.has_per_market_models:
-                    print(f"✗ {crop:12} - No models found")
+                            self.price_configs_per_market[crop][market][horizon] = joblib.load(config_path)
         
-        print("\n" + "="*60)
-        print("MODEL LOADING COMPLETE")
-        total_demand = sum(len(models) for models in self.demand_models.values())
-        total_price = sum(len(models) for models in self.price_models.values())
-        print(f"Demand models loaded: {total_demand}/20 (4 crops × 5 horizons)")
-        if self.has_per_market_models:
-            print(f"Price models loaded: {per_market_count} per-market models")
-        else:
-            print(f"Price models loaded: {total_price}/20 (4 crops × 5 horizons)")
-        print("="*60 + "\n")
+        if per_market_count > 0:
+            self.has_per_market_models = True
+            print(f"✓ Loaded {per_market_count} per-market price models")
+        
+        # Load generic price models (fallback)
+        generic_count = 0
+        for crop, config in self.PRICE_CONFIG.items():
+            self.price_models[crop] = {}
+            self.price_scalers[crop] = {}
+            
+            crop_slug = crop.lower().replace(' ', '_')
+            
+            for horizon in FORECAST_HORIZONS:
+                model = self._load_single_model(price_dir, crop, config, horizon)
+                if model:
+                    self.price_models[crop][horizon] = model
+                    generic_count += 1
+                    
+                    # Load scalers
+                    if config['model_type'] == 'LSTM':
+                        scalers_file = f'{crop_slug}_{horizon}day_lstm_scalers.joblib'
+                        scalers_path = os.path.join(price_dir, scalers_file)
+                        if os.path.exists(scalers_path):
+                            self.price_scalers[crop][horizon] = joblib.load(scalers_path)
+        
+        if generic_count > 0:
+            print(f"✓ Loaded {generic_count} generic price models (fallback)")
+        
+        # Demand models removed - no proper dataset available
+        # Keeping empty dict for API compatibility
+        print("ℹ Demand forecasting disabled (no dataset)")
+        
+        print("="*50 + "\n")
     
-    def _add_temporal_features(self, data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add temporal and seasonal features matching notebook preprocessing.
-        Features: day_of_week, month, quarter, day_of_year, is_weekend, season_encoded, harvest_period
-        """
-        df = data.copy()
+    def _load_single_model(self, price_dir: str, crop: str, config: dict, 
+                          horizon: int, market_slug: str = None):
+        """Load a single price model."""
+        crop_slug = crop.lower().replace(' ', '_')
+        
+        try:
+            # Construct filename
+            if market_slug:
+                prefix = f'{crop_slug}_{market_slug}_{horizon}day'
+            else:
+                prefix = f'{crop_slug}_{horizon}day'
+            
+            if config['model_type'] == 'LSTM':
+                model_file = f'{prefix}_lstm.h5'
+            elif config['model_type'] == 'RandomForest':
+                model_file = f'{prefix}_rf.joblib'
+            elif config['model_type'] == 'LightGBM':
+                model_file = f'{prefix}_lgbm.joblib'
+            else:
+                return None
+            
+            model_path = os.path.join(price_dir, model_file)
+            
+            if os.path.exists(model_path):
+                if config['model_type'] == 'LSTM':
+                    return load_model(model_path, compile=False)
+                else:
+                    return joblib.load(model_path)
+        except Exception as e:
+            pass  # Silent fail, will use fallback
+        
+        return None
+    
+    def _select_horizon(self, days_ahead: int) -> int:
+        """Select closest available forecast horizon."""
+        return min(FORECAST_HORIZONS, key=lambda h: abs(h - days_ahead))
+    
+    def _add_temporal_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add time-based features to data."""
+        df = df.copy()
         df['Date'] = pd.to_datetime(df['Date'])
         
-        # Time-based features
         df['day_of_week'] = df['Date'].dt.dayofweek
         df['month'] = df['Date'].dt.month
         df['quarter'] = df['Date'].dt.quarter
@@ -345,793 +260,291 @@ class SmartFarmingPredictor:
         
         # Sri Lankan seasons: Maha (Oct-Mar), Yala (Apr-Sep)
         df['season_encoded'] = df['month'].apply(lambda x: 1 if x in [10,11,12,1,2,3] else 0)
-        
-        # Harvest period - will be set per-crop if needed
         df['harvest_period'] = df['month'].apply(lambda x: 1 if x in [1,2,3,8,9] else 0)
         
         return df
     
-    def _create_demand_features(self, data: pd.DataFrame, crop: str) -> Optional[np.ndarray]:
-        """
-        Create demand features matching demand_forecasting.ipynb EXACTLY.
-        
-        Feature structure for multivariate models (Beetroot/Radish/Red Onion):
-        - qty_lag_1, qty_lag_2, ... qty_lag_N
-        - price_lag_1, price_lag_2, ... price_lag_N
-        - day_of_week, month, quarter, day_of_year, is_weekend, season_encoded, harvest_period
-        
-        Rice LSTM is univariate: only qty_lag_1 to qty_lag_60
-        
-        Expected feature counts:
-        - Rice: 60 (univariate)
-        - Beetroot: 21 = 7 + 7 + 7 temporal
-        - Radish: 187 = 90 + 90 + 7 temporal
-        - Red Onion: 97 = 45 + 45 + 7 temporal
-        """
-        config = self.DEMAND_CONFIG[crop]
-        lag_days = config['lag_days']
-        
-        # Add temporal features
-        data_with_features = self._add_temporal_features(data)
-        
-        # Filter crop data and sort by date
-        crop_data = data_with_features[data_with_features['item'] == crop].copy().sort_values('Date')
-        
-        if len(crop_data) < lag_days:
-            return None, f"Insufficient data: need {lag_days} days, have {len(crop_data)}"
-        
-        # Get last lag_days of data
-        latest_data = crop_data.iloc[-lag_days:]
-        
-        # Rice LSTM: Univariate (only quantity lags)
-        if config['univariate']:
-            # qty_lag_1 to qty_lag_N (reversed so lag_1 = most recent)
-            qty_lags = latest_data['quantity_tonnes'].values[::-1]  # Reverse for lag ordering
-            feature_vector = qty_lags.reshape(1, -1)
-            return feature_vector, None
-        
-        # Multivariate models (Beetroot, Radish, Red Onion)
-        # Order: qty_lags, price_lags, temporal features (7 features)
-        
-        # Quantity lags (lag_1 to lag_N, reversed)
-        qty_lags = latest_data['quantity_tonnes'].values[::-1]
-        
-        # Price lags (lag_1 to lag_N, reversed)
-        price_lags = latest_data['price'].values[::-1]
-        
-        # Temporal features from the LAST row (current day)
-        last_row = crop_data.iloc[-1]
-        temporal_features = np.array([
-            last_row['day_of_week'],
-            last_row['month'],
-            last_row['quarter'],
-            last_row['day_of_year'],
-            last_row['is_weekend'],
-            last_row['season_encoded'],
-            last_row['harvest_period']
-        ])
-        
-        # Concatenate all features
-        feature_vector = np.concatenate([qty_lags, price_lags, temporal_features]).reshape(1, -1)
-        
-        return feature_vector, None
-    
-    def _create_price_features(self, data: pd.DataFrame, crop: str) -> Optional[np.ndarray]:
-        """
-        Create price features matching 2_model_comparison.ipynb EXACTLY.
-        
-        Feature structure for multivariate models (Beetroot/Radish/Red Onion):
-        - price_lag_1, price_lag_2, ... price_lag_N (for each lag day)
-        - temp_lag_1, temp_lag_2, ... temp_lag_N
-        - rainfall_lag_1, rainfall_lag_2, ... rainfall_lag_N
-        - humidity_lag_1, humidity_lag_2, ... humidity_lag_N
-        - wind_speed_lag_1, wind_speed_lag_2, ... wind_speed_lag_N
-        - sunshine_hours_lag_1, sunshine_hours_lag_2, ... sunshine_hours_lag_N
-        
-        Rice LSTM is univariate: only price lags
-        
-        Expected feature counts:
-        - Rice LSTM: 60 (price only, scaled)
-        - Beetroot RF: 42 = 7 × 6 (price + 5 weather features)
-        - Radish RF: 540 = 90 × 6
-        - Red Onion LGB: 270 = 45 × 6
-        """
+    def _create_price_features(self, data: pd.DataFrame, crop: str) -> Tuple[Optional[np.ndarray], Optional[str]]:
+        """Create feature vector for price prediction."""
         config = self.PRICE_CONFIG[crop]
         lag_days = config['lag_days']
         
-        # Weather feature columns
-        weather_cols = ['temp', 'rainfall', 'humidity', 'wind_speed', 'sunshine_hours']
-        
-        # Filter crop data and sort by date
+        # Filter and sort
         crop_data = data[data['item'] == crop].copy().sort_values('Date')
         
         if len(crop_data) < lag_days:
-            return None, f"Insufficient data: need {lag_days} days, have {len(crop_data)}"
+            return None, f"Need {lag_days} days of data, have {len(crop_data)}"
         
-        # Get last lag_days of data
-        latest_data = crop_data.iloc[-lag_days:]
+        latest = crop_data.iloc[-lag_days:]
         
-        # Rice LSTM: Univariate (price only)
+        # LSTM: price only
         if config['model_type'] == 'LSTM':
-            # Only price lags for Rice LSTM
-            price_lags = latest_data['price'].values
-            feature_vector = price_lags.reshape(1, -1)
-            return feature_vector, None
+            return latest['price'].values.reshape(1, -1), None
         
-        # Multivariate models (Beetroot RF, Radish RF, Red Onion LGB)
-        # Order: price_lags, then each weather feature's lags
+        # RF/LightGBM: price + weather
+        all_features = [latest['price'].values]
         
-        # Price lags
-        price_lags = latest_data['price'].values
-        
-        # Weather feature lags
-        all_features = [price_lags]
-        for col in weather_cols:
-            if col in latest_data.columns:
-                # Fill missing values with mean
-                col_values = latest_data[col].fillna(latest_data[col].mean()).values
-                all_features.append(col_values)
+        for col in self.WEATHER_FEATURES:
+            if col in latest.columns:
+                vals = latest[col].fillna(latest[col].mean()).values
+                all_features.append(vals)
             else:
-                # If column missing, use zeros
                 all_features.append(np.zeros(lag_days))
         
-        # Concatenate: [price_lags, temp_lags, rainfall_lags, humidity_lags, wind_speed_lags, sunshine_lags]
-        feature_vector = np.concatenate(all_features).reshape(1, -1)
-        
-        return feature_vector, None
+        return np.concatenate(all_features).reshape(1, -1), None
     
-    def predict_demand(self, current_data: pd.DataFrame, crop: str, days_ahead: int = 7) -> Dict:
+    def predict_price(self, data: pd.DataFrame, crop: str, 
+                     days_ahead: int = 7, market: str = None) -> Dict:
         """
-        Predict future quantity demanded for crop using multi-horizon models.
+        Predict future price for a crop.
         
         Args:
-            current_data: DataFrame with columns ['Date', 'item', 'market', 'quantity_tonnes', 'price', ...]
+            data: DataFrame with columns ['Date', 'item', 'price', ...]
             crop: Crop name ('Rice', 'Beetroot', 'Radish', 'Red Onion')
-            days_ahead: Forecast horizon (days)
+            days_ahead: Forecast horizon (7, 14, or 30 days)
+            market: Optional market name for location-specific prediction
         
         Returns:
-            Dict with predicted demand or error message
+            Dict containing:
+            - predicted_price: Forecasted price (LKR/kg)
+            - current_price: Current market price
+            - price_change_percent: Expected % change
+            - confidence_interval: {lower, upper} bounds
+            - horizon_used: Actual model horizon used
         """
-        if crop not in self.demand_models:
-            return {'error': f'Demand model for {crop} not loaded'}
+        if crop not in TARGET_CROPS:
+            return {'error': f'Unknown crop: {crop}. Supported: {TARGET_CROPS}'}
         
-        # Select appropriate horizon model
         horizon = self._select_horizon(days_ahead)
         
-        if horizon not in self.demand_models[crop]:
-            return {'error': f'No {horizon}-day model available for {crop}'}
-        
-        # Get crop data and validate
-        crop_data = current_data[current_data['item'] == crop].copy().sort_values('Date')
-        if len(crop_data) == 0:
-            return {'error': f'No data found for crop {crop}'}
-        
-        current_demand = crop_data['quantity_tonnes'].iloc[-1]
-        
-        # Create features
-        feature_vector, error = self._create_demand_features(current_data, crop)
-        if error:
-            return {'error': error}
-        
-        config = self.DEMAND_CONFIG[crop]
-        model = self.demand_models[crop][horizon]
-        
-        # Scale features
-        scaler = MinMaxScaler()
-        features_scaled = scaler.fit_transform(feature_vector)
-        
-        # Model prediction based on type
-        if config['model_type'] == 'LSTM':
-            # LSTM: Reshape for [samples, timesteps, features]
-            features_scaled = features_scaled.reshape((1, config['lag_days'], 1))
-            predicted = model.predict(features_scaled, verbose=0)
-            predicted_demand = float(predicted[0][0])
-        else:
-            # RandomForest or LightGBM
-            predicted = model.predict(features_scaled)
-            predicted_demand = float(predicted[0])
-        
-        # Calculate change percentage
-        demand_change_pct = ((predicted_demand - current_demand) / current_demand * 100) if current_demand > 0 else 0
-        
-        return {
-            'crop': crop,
-            'current_demand': float(current_demand),
-            'predicted_demand': predicted_demand,
-            'predicted_quantity': predicted_demand,  # Alias for compatibility
-            'demand_change_percent': demand_change_pct,
-            'days_ahead': days_ahead,
-            'horizon_used': horizon,  # Show which model was actually used
-            'model_type': config['model_type'],
-            'lag_days': config['lag_days']
-        }
-    
-    def _select_horizon(self, days_ahead: int) -> int:
-        """
-        Select the best horizon model for the requested days_ahead.
-        Returns the closest available horizon from FORECAST_HORIZONS.
-        """
-        # Find closest horizon
-        closest_horizon = min(self.FORECAST_HORIZONS, key=lambda h: abs(h - days_ahead))
-        return closest_horizon
-    
-    def predict_price(self, current_data: pd.DataFrame, crop: str, 
-                      days_ahead: int = 7, market: str = None) -> Dict:
-        """
-        Predict future price for crop using multi-horizon models.
-        Supports per-market models when available.
-        
-        Args:
-            current_data: DataFrame with columns ['Date', 'item', 'price', ...]
-            crop: Crop name ('Rice', 'Beetroot', 'Radish', 'Red Onion')
-            days_ahead: Forecast horizon in days
-            market: Optional market name for per-market prediction
-        
-        Returns:
-            Dict with predicted price or error message
-        """
-        # Select appropriate horizon model
-        horizon = self._select_horizon(days_ahead)
-        
-        # Try per-market model first if market provided
+        # Try per-market model first
         model = None
         scalers = None
-        using_per_market = False
         
         if market and self.has_per_market_models:
-            if (crop in self.price_models_per_market and 
-                market in self.price_models_per_market[crop] and
-                horizon in self.price_models_per_market[crop][market]):
+            if (crop in self.price_models_per_market and
+                market in self.price_models_per_market.get(crop, {}) and
+                horizon in self.price_models_per_market[crop].get(market, {})):
                 model = self.price_models_per_market[crop][market][horizon]
-                if (crop in self.price_scalers_per_market and 
-                    market in self.price_scalers_per_market[crop] and
-                    horizon in self.price_scalers_per_market[crop][market]):
-                    scalers = self.price_scalers_per_market[crop][market][horizon]
-                using_per_market = True
+                scalers = self.price_scalers_per_market.get(crop, {}).get(market, {}).get(horizon)
         
-        # Fallback to generic crop model
+        # Fallback to generic model
         if model is None:
-            if crop not in self.price_models:
-                return {'error': f'Price model for {crop} not loaded'}
-            if horizon not in self.price_models[crop]:
-                return {'error': f'No {horizon}-day model available for {crop}'}
+            if crop not in self.price_models or horizon not in self.price_models.get(crop, {}):
+                return {'error': f'No model for {crop} {horizon}-day horizon'}
             model = self.price_models[crop][horizon]
-            if crop in self.price_scalers and horizon in self.price_scalers[crop]:
-                scalers = self.price_scalers[crop][horizon]
+            scalers = self.price_scalers.get(crop, {}).get(horizon)
         
-        # Get crop data and validate
-        crop_data = current_data[current_data['item'] == crop].copy().sort_values('Date')
+        # Get current price
+        crop_data = data[data['item'] == crop].copy().sort_values('Date')
         if len(crop_data) == 0:
-            return {'error': f'No data found for crop {crop}'}
+            return {'error': f'No data for {crop}'}
         
-        current_price = crop_data['price'].iloc[-1]
+        current_price = float(crop_data['price'].iloc[-1])
         config = self.PRICE_CONFIG[crop]
         
         # Create features
-        feature_vector, error = self._create_price_features(current_data, crop)
+        features, error = self._create_price_features(data, crop)
         if error:
             return {'error': error}
         
         try:
             if config['model_type'] == 'LSTM':
-                # LSTM with scaling
+                # LSTM needs scaling
                 if scalers and 'y' in scalers:
                     scaler_y = scalers['y']
-                    # Scale each price value individually (reshape to column vector)
-                    prices_column = feature_vector.reshape(-1, 1)  # (60, 1)
-                    features_scaled = scaler_y.transform(prices_column)
-                    # Reshape for LSTM: [1, timesteps, 1]
-                    features_scaled = features_scaled.reshape((1, config['lag_days'], 1))
-                    predicted_scaled = model.predict(features_scaled, verbose=0)
-                    # Inverse transform
-                    predicted_price = float(scaler_y.inverse_transform(predicted_scaled.reshape(-1, 1))[0][0])
+                    prices_col = features.reshape(-1, 1)
+                    scaled = scaler_y.transform(prices_col)
+                    scaled = scaled.reshape((1, config['lag_days'], 1))
+                    pred_scaled = model.predict(scaled, verbose=0)
+                    predicted = float(scaler_y.inverse_transform(pred_scaled.reshape(-1, 1))[0][0])
                 else:
-                    # Fallback without scalers - scale each price value
                     scaler = MinMaxScaler()
-                    prices_column = feature_vector.reshape(-1, 1)
-                    features_scaled = scaler.fit_transform(prices_column)
-                    features_scaled = features_scaled.reshape((1, config['lag_days'], 1))
-                    predicted = model.predict(features_scaled, verbose=0)
-                    predicted_price = float(predicted[0][0])
+                    scaled = scaler.fit_transform(features.reshape(-1, 1))
+                    scaled = scaled.reshape((1, config['lag_days'], 1))
+                    pred = model.predict(scaled, verbose=0)
+                    predicted = float(pred[0][0])
             else:
-                # RandomForest or LightGBM (no scaling needed)
-                predicted = model.predict(feature_vector)
-                predicted_price = float(predicted[0])
+                # RF/LightGBM - no scaling
+                pred = model.predict(features)
+                predicted = float(pred[0])
             
-            # Ensure non-negative price
-            predicted_price = max(0, predicted_price)
+            predicted = max(0, predicted)  # Ensure non-negative
             
         except Exception as e:
             return {'error': f'Prediction failed: {str(e)}'}
         
-        # Calculate change percentage
-        price_change_pct = ((predicted_price - current_price) / current_price * 100) if current_price > 0 else 0
+        # Calculate metrics
+        change_pct = ((predicted - current_price) / current_price * 100) if current_price > 0 else 0
         
-        # Calculate Prediction Intervals (95% CI)
-        rmse = self.MODEL_RMSE.get(crop, 20.0)
+        # Confidence interval (95%)
+        rmse = MODEL_RMSE.get(crop, 20.0)
         margin = 1.96 * rmse
-        lower_bound = max(0, predicted_price - margin)
-        upper_bound = predicted_price + margin
         
         return {
             'crop': crop,
-            'current_price': float(current_price),
-            'predicted_price': predicted_price,
-            'price_change_percent': price_change_pct,
+            'market': market,
+            'current_price': current_price,
+            'predicted_price': round(predicted, 2),
+            'price_change_percent': round(change_pct, 2),
             'confidence_interval': {
-                'lower': lower_bound,
-                'upper': upper_bound,
-                'margin': margin
+                'lower': round(max(0, predicted - margin), 2),
+                'upper': round(predicted + margin, 2)
             },
             'days_ahead': days_ahead,
-            'horizon_used': horizon,  # Show which model was actually used
-            'model_type': config['model_type'],
-            'lag_days': config['lag_days']
+            'horizon_used': horizon,
+            'model_type': config['model_type']
         }
     
-    def get_recommendation(self, price_change_pct: float, demand_change_pct: float, 
-                          current_price: float, predicted_price: float,
-                          profit_config: ProfitConfig = None,
-                          days_ahead: int = 7) -> Tuple[str, float, str]:
+    def predict_demand(self, data: pd.DataFrame, crop: str, days_ahead: int = 7) -> Dict:
         """
-        Generate trading recommendation based on PROFITABILITY.
-        Considers price change, transport cost, storage cost, and spoilage.
+        Predict future demand for a crop.
+        
+        NOTE: Demand forecasting has been disabled due to lack of proper dataset.
+        This method returns an error message.
         
         Args:
-            price_change_pct: Expected price change percentage
-            demand_change_pct: Expected demand change percentage
-            current_price: Current market price per kg
-            predicted_price: Forecasted price per kg
-            profit_config: storage/transport/spoilage costs
-            days_ahead: Number of days to hold
+            data: DataFrame with columns ['Date', 'item', 'quantity_tonnes', ...]
+            crop: Crop name
+            days_ahead: Forecast horizon
         
         Returns:
-            (recommendation, confidence_score, reasoning_text)
+            Dict with error message
+        """
+        return {
+            'error': 'Demand forecasting is disabled - no proper dataset available',
+            'crop': crop,
+            'days_ahead': days_ahead
+        }
+    
+    def get_recommendation(self, crop: str, current_price: float, predicted_price: float,
+                          days_ahead: int = 7, quantity_kg: float = 1000,
+                          profit_config: ProfitConfig = None) -> Dict:
+        """
+        Get trading recommendation based on price prediction and economics.
+        
+        Args:
+            crop: Crop name
+            current_price: Current price (LKR/kg)
+            predicted_price: Predicted price (LKR/kg)
+            days_ahead: Holding period
+            quantity_kg: Batch size in kg
+            profit_config: Storage/transport costs
+        
+        Returns:
+            Dict with decision, reasoning, and profit analysis
         """
         if profit_config is None:
-            profit_config = ProfitConfig()
-            
-        # --- 1. Economic Analysis ---
-        # Assume a standard batch size for calculation (e.g. 1000 kg)
-        BATCH_KG = 1000.0
+            # Set spoilage based on crop perishability
+            shelf_life = PERISHABILITY.get(crop, 30)
+            if shelf_life <= 7:
+                spoilage = 2.0
+            elif shelf_life <= 14:
+                spoilage = 1.0
+            else:
+                spoilage = 0.3
+            profit_config = ProfitConfig(spoilage_rate=spoilage)
         
-        # Scenario A: Sell NOW
-        revenue_now = (current_price * BATCH_KG) - profit_config.transport_cost
+        # Calculate economics
+        revenue_now = (current_price * quantity_kg) - profit_config.transport_cost
         
-        # Scenario B: Sell LATER
-        # Spoilage reduces the sellable quantity
-        spoilage_factor = 1.0 - (profit_config.spoilage_rate / 100.0 * days_ahead)
-        qty_later = BATCH_KG * max(0.0, spoilage_factor)
+        # Spoilage reduces sellable quantity
+        spoilage_factor = max(0, 1.0 - (profit_config.spoilage_rate / 100.0 * days_ahead))
+        qty_later = quantity_kg * spoilage_factor
+        storage_total = profit_config.storage_cost * days_ahead * quantity_kg
         
-        # Holding costs
-        storage_cost_total = profit_config.storage_cost * days_ahead * BATCH_KG
+        revenue_later = (predicted_price * qty_later) - profit_config.transport_cost - storage_total
         
-        revenue_later = (predicted_price * qty_later) - profit_config.transport_cost - storage_cost_total
-        
-        # Net Benefit of Waiting
         profit_delta = revenue_later - revenue_now
         profit_delta_pct = (profit_delta / revenue_now * 100) if revenue_now > 0 else 0
         
-        # --- 2. Signal Generation ---
-        # Thresholds for profit-based decision
-        PROFIT_HOLD_THRESHOLD = 2.0   # If we make >2% more by waiting -> HOLD
-        LOSS_SELL_THRESHOLD = -2.0    # If we lose >2% by waiting -> SELL
-        
-        recommendation = "NEUTRAL"
-        reasoning_parts = []
-        
-        if profit_delta_pct >= PROFIT_HOLD_THRESHOLD:
-            # It is profitable to wait
-            if profit_delta_pct > 10.0:
-                recommendation = "STRONG HOLD"
-            else:
-                recommendation = "HOLD"
-            reasoning_parts.append(f"Wait for profit: +{profit_delta_pct:.1f}% expected")
-            
-        elif profit_delta_pct <= LOSS_SELL_THRESHOLD:
-            # It is better to sell now (waiting incurs loss)
-            if profit_delta_pct < -10.0:
-                recommendation = "STRONG SELL"
-            else:
-                recommendation = "SELL"
-            reasoning_parts.append(f"Sell now to avoid loss: {profit_delta_pct:.1f}% if held")
-            
+        # Decision logic
+        if profit_delta_pct >= 10.0:
+            decision = "STRONG HOLD"
+            reasoning = f"Wait for +{profit_delta_pct:.1f}% profit"
+        elif profit_delta_pct >= 2.0:
+            decision = "HOLD"
+            reasoning = f"Moderate profit opportunity: +{profit_delta_pct:.1f}%"
+        elif profit_delta_pct <= -10.0:
+            decision = "STRONG SELL"
+            reasoning = f"Sell now to avoid {abs(profit_delta_pct):.1f}% loss"
+        elif profit_delta_pct <= -2.0:
+            decision = "SELL"
+            reasoning = f"Sell now, holding would lose {abs(profit_delta_pct):.1f}%"
         else:
-            # Neutral / Price stable
-            recommendation = "NEUTRAL"
-            reasoning_parts.append(f"Price stable ({profit_delta_pct:+.1f}%), sell when convenient")
-
-        # --- 3. Demand Context ---
-        if abs(demand_change_pct) > 2.0:
-             d_dir = "rising" if demand_change_pct > 0 else "falling"
-             reasoning_parts.append(f"Demand {d_dir} ({demand_change_pct:+.1f}%)")
-
-        reasoning = " | ".join(reasoning_parts)
-
-        # --- 4. Confidence Score ---
-        # Base confidence on magnitude of price movement model detected
-        # (The profit model correctness depends on the price prediction accuracy)
-        model_confidence = min(abs(price_change_pct) / 10.0, 0.9)
-        
-        # Adjust based on economic clarity
-        # If profit delta is huge, we are more confident in the economic decision
-        if abs(profit_delta_pct) > 5.0:
-            confidence = min(model_confidence + 0.2, 1.0)
-        else:
-            confidence = model_confidence
-            
-        return recommendation, confidence, reasoning
-    
-    def get_all_predictions(self, current_data: pd.DataFrame, profit_config: ProfitConfig = None) -> Dict:
-        """
-        Generate all predictions and recommendations for all crops.
-        
-        Args:
-            current_data: Full dataset with all crops
-            profit_config: Optional profit configuration
-        
-        Returns:
-            Dict with predictions for each crop
-        """
-        results = {}
-        
-        for crop in self.DEMAND_CONFIG.keys():
-            demand_pred = self.predict_demand(current_data, crop)
-            price_pred = self.predict_price(current_data, crop)
-            
-            if 'error' not in demand_pred and 'error' not in price_pred:
-                demand_change = demand_pred['demand_change_percent']
-                price_change = price_pred['price_change_percent']
-                
-                rec, conf, reason = self.get_recommendation(
-                    price_change, 
-                    demand_change,
-                    price_pred['current_price'],
-                    price_pred['predicted_price'],
-                    profit_config=profit_config
-                )
-                
-                results[crop] = {
-                    'demand': demand_pred,
-                    'price': price_pred,
-                    'recommendation': {
-                        'action': rec,
-                        'confidence': conf,
-                        'reasoning': reason,
-                        'profit_config_used': profit_config
-                    }
-                }
-            else:
-                results[crop] = {
-                    'error': 'Prediction failed',
-                    'demand_error': demand_pred.get('error'),
-                    'price_error': price_pred.get('error')
-                }
-        
-        return results
-
-
-
-# =================================================================================
-# WRAPPER FOR V2.0 APP INTERFACE
-# =================================================================================
-class YieldSyncPredictor(SmartFarmingPredictor):
-    """
-    Wrapper for V2.0 App Interface.
-    Simplifies the API to match the new Streamlit requirements.
-    """
-    def __init__(self, model_base_dir: Optional[str] = None):
-        # Auto-detect path if not provided
-        # Models are in models/saved_models/ directory (matching notebooks)
-        if model_base_dir is None:
-            base_dir = os.path.dirname(os.path.abspath(__file__))  # app/
-            project_root = os.path.dirname(base_dir)  # project root
-            model_base_dir = os.path.join(project_root, 'models', 'saved_models')
-        super().__init__(model_base_dir=model_base_dir)
-
-    def get_recommendation(
-        self, 
-        crop: str, 
-        price_history: List[float], 
-        volume_history: List[float], 
-        current_date: datetime, 
-        quantity_kg: float, 
-        days_since_harvest: int
-    ) -> Dict:
-        """
-        V2.0 API for getting recommendations with spoilage and holding cost analysis.
-        """
-        # 1. Prepare Data
-        current_price = price_history[-1]
-        
-        # Import harvest periods from config
-        from config import HARVEST_PERIODS, PERISHABILITY
-        
-        # Construct dataframe for predictions
-        # We assume daily intervals ending at current_date
-        # Ensure we have enough history for the longest lag (90 days)
-        # Pad with the first value if history is too short
-        df_len = 120 # Safe buffer
-        
-        hist_len = len(price_history)
-        if hist_len < df_len:
-             # simple pad
-             price_history = [price_history[0]] * (df_len - hist_len) + price_history
-             volume_history = [volume_history[0]] * (df_len - hist_len) + volume_history
-        
-        # Recalculate length after padding
-        hist_len = len(price_history)
-        dates = [current_date - pd.Timedelta(days=hist_len-1-i) for i in range(hist_len)]
-
-        df = pd.DataFrame({
-            'Date': dates,
-            'item': [crop] * hist_len,
-            'price': price_history,
-            'volume_MT': volume_history,
-            # Add dummy weather/other cols required by feature engineering
-            'temperature_avg_C': [27.5] * hist_len,
-            'rainfall_mm': [5.0] * hist_len,
-            'humidity_percent': [75.0] * hist_len,
-            'wind_speed': [10.0] * hist_len, 
-            'sunshine_hours': [5.0] * hist_len,
-            'is_holiday': [0] * hist_len,
-            'is_public_holiday': [0] * hist_len, # Match column name
-            'demand_multiplier': [1.0] * hist_len,
-            'season_encoded': [0] * hist_len,
-            'harvest_period': [0] * hist_len,
-            # Additional columns that might be checked
-            'quantity_tonnes': volume_history # alias volume_MT
-        })
-        
-        predictions = {}
-        demand_predictions = {}
-        
-        # 2. Get Forecasts for standard horizons
-        horizons = [7, 14, 30, 60, 84]  # Added 12 weeks (84 days)
-        labels = ['1 Week', '2 Weeks', '1 Month', '2 Months', '3 Months']
-        
-        # Profit Config with Dynamic Spoilage Based on Days Since Harvest
-        # Spoilage accelerates as crop ages
-        perishability = PERISHABILITY.get(crop, 'Medium')
-        
-        # If days_since_harvest is -1, crop not yet harvested (no spoilage)
-        if days_since_harvest == -1:
-            # Planning mode - crop still growing
-            current_spoilage_rate = 0.0
-            shelf_life_remaining = 999  # No spoilage concern
-            urgency_warning = "🌱 Crop not harvested yet. Use predictions to plan optimal harvest timing."
-        else:
-            # Already harvested - calculate spoilage
-            # Base spoilage rates per day (%)
-            base_spoilage = {
-                'Very High': 2.0,  # Radish - spoils fast
-                'High': 1.5,       # Beetroot
-                'Medium': 1.0,     # Red Onion
-                'Low': 0.3         # Rice - lasts longer
-            }
-            
-            current_spoilage_rate = base_spoilage.get(perishability, 1.0)
-            
-            # Increase spoilage rate based on age (accelerates over time)
-            if days_since_harvest > 7:
-                current_spoilage_rate *= 1.5  # 50% faster spoilage after 1 week
-            if days_since_harvest > 14:
-                current_spoilage_rate *= 2.0  # Doubles after 2 weeks
-            if days_since_harvest > 21:
-                current_spoilage_rate *= 3.0  # Triples after 3 weeks
-            
-            # Calculate remaining shelf life
-            max_shelf_life = {
-                'Very High': 7,   # Radish - 1 week max
-                'High': 14,       # Beetroot - 2 weeks
-                'Medium': 21,     # Red Onion - 3 weeks
-                'Low': 90         # Rice - 3 months
-            }
-            
-            shelf_life_remaining = max_shelf_life.get(perishability, 14) - days_since_harvest
-            urgency_warning = ""
-            
-            # Critical spoilage warnings
-            if shelf_life_remaining <= 0:
-                urgency_warning = "⚠️ CRITICAL: Crop may be spoiled! Sell immediately at any price."
-            elif shelf_life_remaining <= 3:
-                urgency_warning = f"🔴 URGENT: Only {shelf_life_remaining} days before spoiling! Sell NOW."
-            elif shelf_life_remaining <= 7:
-                urgency_warning = f"⚠️ WARNING: {shelf_life_remaining} days shelf life remaining. Sell soon."
-        
-        # Storage cost increases with perishability (need better storage for perishable items)
-        storage_cost_per_kg = {
-            'Very High': 2.0,  # Refrigerated storage needed
-            'High': 1.5,
-            'Medium': 1.0,
-            'Low': 0.5         # Simple warehouse
-        }
-        
-        profit_config = ProfitConfig(
-            transport_cost=5.0,
-            storage_cost=storage_cost_per_kg.get(perishability, 1.0),
-            spoilage_rate=current_spoilage_rate
-        )
-
-        best_decision = "WAIT"
-        best_profit = -float('inf')  # Changed from 0.0 to allow negative profits
-        best_horizon = 0
-        best_price = current_price
-        best_reason = "No profitable opportunity found."
-        
-        # Get Price Predictions for ALL horizons (farmers need long-term market view)
-        for days, label in zip(horizons, labels):
-            try:
-                pred = self.predict_price(df, crop, days)
-                if 'predicted_price' in pred and 'error' not in pred:
-                    p_price = pred['predicted_price']
-                    predictions[label] = round(p_price, 2)
-                    
-                    # Profit Logic with cumulative spoilage
-                    # Spoilage compounds daily
-                    total_spoilage_pct = 0
-                    current_qty = quantity_kg
-                    for day in range(days):
-                        day_age = days_since_harvest + day
-                        day_spoilage_rate = current_spoilage_rate
-                        
-                        # Accelerate spoilage as it ages
-                        if day_age > 7:
-                            day_spoilage_rate *= 1.5
-                        if day_age > 14:
-                            day_spoilage_rate *= 2.0
-                        if day_age > 21:
-                            day_spoilage_rate *= 3.0
-                        
-                        daily_loss = current_qty * (day_spoilage_rate / 100)
-                        current_qty = max(0, current_qty - daily_loss)
-                    
-                    remaining_qty = current_qty
-                    
-                    revenue_later = (p_price * remaining_qty) - profit_config.transport_cost
-                    revenue_now = (current_price * quantity_kg) - profit_config.transport_cost
-                    storage_total = profit_config.storage_cost * quantity_kg * days
-                    
-                    net_revenue_later = revenue_later - storage_total
-                    profit_gain = net_revenue_later - revenue_now
-                    
-                    # Override decision if spoilage risk is high
-                    if shelf_life_remaining <= 3:
-                        # Critical: Sell immediately regardless of profit
-                        if profit_gain > best_profit or best_decision != "SELL":
-                            best_profit = profit_gain
-                            best_horizon = days
-                            best_price = p_price
-                            best_decision = "SELL"
-                            best_reason = f"URGENT: Only {shelf_life_remaining} days before spoiling! Sell now even if price is low. Expected spoilage loss: {100-remaining_qty/quantity_kg*100:.0f}%"
-                    elif profit_gain > best_profit:
-                        best_profit = profit_gain
-                        best_horizon = days
-                        best_price = p_price
-                        
-                        price_change_pct = ((p_price - current_price) / current_price) * 100 if current_price > 0 else 0
-                        spoilage_loss_pct = (1 - remaining_qty / quantity_kg) * 100
-                        
-                        # Decision logic considering spoilage
-                        if profit_gain > (revenue_now * 0.05) and spoilage_loss_pct < 20: # Good profit, manageable spoilage
-                            best_decision = "HOLD" if days < 30 else "STRONG HOLD"
-                            best_reason = f"Price +{price_change_pct:.1f}% in {label}. Net profit +{profit_gain:.0f} LKR. Spoilage: {spoilage_loss_pct:.0f}%"
-                        elif profit_gain < (revenue_now * -0.02) or spoilage_loss_pct > 30: # Loss or high spoilage
-                            best_decision = "SELL"
-                            best_reason = f"High spoilage risk ({spoilage_loss_pct:.0f}%) or price drop expected. Sell now to minimize loss."
-                        else:
-                            best_decision = "WAIT"
-                            best_reason = f"Market stable. Spoilage risk: {spoilage_loss_pct:.0f}%. Monitor closely."
-                else:
-                    # Prediction failed - use current price as fallback
-                    predictions[label] = round(current_price, 2)
-            except Exception as e:
-                predictions[label] = round(current_price, 2)
-        
-        # Get Demand Predictions (Optional - may fail if models missing)
-        try:
-             for days, label in zip(horizons, labels):
-                 d_pred = self.predict_demand(df, crop, days)
-                 if 'predicted_quantity' in d_pred and 'error' not in d_pred:
-                     demand_predictions[label] = round(d_pred['predicted_quantity'], 1)
-        except Exception as e:
-            # Silently skip demand predictions if models are missing
-            pass
-        
-        # Calculate trend signal (Rising/Steady/Falling)
-        trend_signal = "Steady →"
-        if len(predictions) >= 2:
-            prices_list = [predictions[l] for l in labels[:len(predictions)]]
-            first_price = prices_list[0]
-            last_price = prices_list[-1]
-            price_change_pct = ((last_price - current_price) / current_price * 100) if current_price > 0 else 0
-            
-            if price_change_pct > 5:
-                trend_signal = "Rising ↗️"
-            elif price_change_pct < -5:
-                trend_signal = "Falling ↘️"
-            else:
-                trend_signal = "Steady →"
-        
-        # Check if it's currently harvest season for this crop
-        current_month = current_date.month
-        harvest_months = HARVEST_PERIODS.get(crop, [])
-        in_harvest_season = current_month in harvest_months
-        
-        harvest_context = ""
-        if in_harvest_season:
-            harvest_context = f"⚠️ Currently in {crop} harvest season. Prices typically lower due to high supply."
-        elif current_month in [(m % 12) + 1 for m in harvest_months]:  # Month after harvest
-            harvest_context = f"✓ Post-harvest period. Supply decreasing, prices may rise."
+            decision = "NEUTRAL"
+            reasoning = f"Price stable ({profit_delta_pct:+.1f}%), sell when convenient"
         
         return {
-            'decision': best_decision,
-            'confidence': 85.0 if best_decision != "WAIT" else 60.0,
-            'reasoning': best_reason,
-            'urgency_warning': urgency_warning,
-            'harvest_context': harvest_context,
-            'days_since_harvest': days_since_harvest,
-            'shelf_life_remaining': max(0, shelf_life_remaining),
-            'perishability': perishability,
-            'expected_profit_per_kg': (best_profit / quantity_kg) if quantity_kg > 0 and best_profit != -float('inf') else 0,
-            'expected_profit_total': best_profit if best_profit != -float('inf') else 0,
-            'best_hold_days': best_horizon,
-            'best_time': f"in {best_horizon} days" if best_horizon > 0 else "now",
-            'best_price': best_price,
-            'current_price': current_price,
-            'predictions': predictions,
-            'demand_predictions': demand_predictions,
-            'trend_signal': trend_signal,
-            'season': self._get_season(current_date),
-            'upcoming_festivals': self._get_upcoming_festivals(current_date, days=30)
+            'decision': decision,
+            'reasoning': reasoning,
+            'profit_analysis': {
+                'revenue_if_sell_now': round(revenue_now, 2),
+                'revenue_if_hold': round(revenue_later, 2),
+                'profit_difference': round(profit_delta, 2),
+                'profit_change_percent': round(profit_delta_pct, 2),
+                'spoilage_loss_percent': round((1 - spoilage_factor) * 100, 2),
+                'storage_cost_total': round(storage_total, 2)
+            },
+            'confidence': min(abs(profit_delta_pct) / 10.0 + 0.5, 0.95)
         }
     
-    def _get_season(self, date: datetime) -> Dict:
-        """Get current agricultural season"""
-        month = date.month
-        if month in [10, 11, 12, 1, 2, 3]:
-            return {'name': 'Maha', 'name_si': 'මහ', 'description': 'Main cultivation season'}
-        else:
-            return {'name': 'Yala', 'name_si': 'යල', 'description': 'Secondary season'}
+    def get_available_markets(self, crop: str) -> List[str]:
+        """Get list of markets with models for a crop."""
+        return CROP_MARKETS.get(crop, [])
     
-    def _get_upcoming_festivals(self, date: datetime, days: int = 30) -> List[Dict]:
-        """Get festivals within next N days"""
-        festivals = []
-        current_month = date.month
-        current_day = date.day
-        
-        # Major festivals (approximate - would need lunar calendar for exact dates)
-        festival_data = [
-            {'name': 'Sinhala New Year', 'month': 4, 'day': 14, 'impact': 'high'},
-            {'name': 'Vesak', 'month': 5, 'day': 15, 'impact': 'high'},
-            {'name': 'Poson', 'month': 6, 'day': 15, 'impact': 'medium'},
-            {'name': 'Esala', 'month': 7, 'day': 15, 'impact': 'medium'},
-            {'name': 'Christmas', 'month': 12, 'day': 25, 'impact': 'high'},
-            {'name': 'Thai Pongal', 'month': 1, 'day': 14, 'impact': 'medium'}
-        ]
-        
-        for fest in festival_data:
-            # Simple check if festival is within next 30 days (approximate)
-            if fest['month'] == current_month and fest['day'] >= current_day:
-                days_until = fest['day'] - current_day
-                if days_until <= days:
-                    festivals.append({
-                        'name': fest['name'],
-                        'days_until': days_until,
-                        'impact': fest['impact']
-                    })
-            elif fest['month'] == current_month + 1:
-                days_until = (30 - current_day) + fest['day']
-                if days_until <= days:
-                    festivals.append({
-                        'name': fest['name'],
-                        'days_until': days_until,
-                        'impact': fest['impact']
-                    })
-        
-        return festivals
+    def get_available_crops(self) -> List[str]:
+        """Get list of supported crops."""
+        return TARGET_CROPS
 
-# Example usage
+
+# =============================================================================
+# CONVENIENCE FUNCTION
+# =============================================================================
+def quick_predict(crop: str, market: str = None, days_ahead: int = 7, 
+                  data_path: str = None) -> Dict:
+    """
+    Quick prediction without manual data loading.
+    
+    Args:
+        crop: Crop name
+        market: Market name (optional)
+        days_ahead: Forecast horizon
+        data_path: Path to CSV data (auto-detects if not provided)
+    
+    Returns:
+        Prediction result dict
+    """
+    # Auto-detect data path
+    if data_path is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        data_path = os.path.join(base_dir, 'data', 'full_history_features_real_weather.csv')
+        
+        if not os.path.exists(data_path):
+            parent_dir = os.path.dirname(base_dir)
+            data_path = os.path.join(parent_dir, 'data', 'full_history_features_real_weather.csv')
+    
+    if not os.path.exists(data_path):
+        return {'error': f'Data file not found: {data_path}'}
+    
+    # Load data
+    data = pd.read_csv(data_path)
+    data['Date'] = pd.to_datetime(data['Date'])
+    
+    # Initialize predictor and predict
+    predictor = YieldSyncPredictor()
+    return predictor.predict_price(data, crop, days_ahead, market)
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
 if __name__ == '__main__':
-    print("YieldSyncPredictor Ready")
-
+    print("YieldSync Predictor Module")
+    print("=" * 40)
+    print(f"Supported crops: {TARGET_CROPS}")
+    print(f"Forecast horizons: {FORECAST_HORIZONS} days")
+    print("\nExample usage:")
+    print("  from predictor import YieldSyncPredictor, quick_predict")
+    print("  result = quick_predict('Rice', market='Colombo', days_ahead=7)")
+    print("  print(result)")

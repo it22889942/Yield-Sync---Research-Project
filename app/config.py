@@ -1,18 +1,110 @@
 """
-Configuration settings for Yield Sync App
+YieldSync Configuration
+=======================
+All configuration settings for the price forecasting system.
 """
 
-# Supported Crops
+# =============================================================================
+# SUPPORTED CROPS AND MARKETS
+# =============================================================================
+
 TARGET_CROPS = ['Rice', 'Beetroot', 'Radish', 'Red Onion']
 
-# Forecast Horizons (Label -> Days)
+# Crop-Market Mapping: Only these markets are valid for each crop
+CROP_MARKETS = {
+    'Rice': [
+        'Colombo', 'Anuradhapura', 'Moneragala', 'Dambulla',
+        'Ampara', 'Kandy', 'Kurunegala', 'Polonnaruwa'
+    ],
+    'Beetroot': [
+        'Colombo', 'Thambuththegama', 'Bandarawela',
+        'Dambulla', 'Kandy', 'Nuwara Eliya'
+    ],
+    'Radish': [
+        'Colombo', 'Moneragala', 'Dambulla', 'Kandy', 'Meegoda'
+    ],
+    'Red Onion': [
+        'Colombo', 'Puttalam', 'Mullaittivu', 'Vavuniya', 'Batticaloa',
+        'Dambulla', 'Embilipitiya', 'Jaffna', 'Kandy', 'Mannar',
+        'Meegoda', 'Moneragala', 'Nuwara Eliya', 'Thambuththegama', 'Trincomalee'
+    ]
+}
+
+# Get all unique markets
+ALL_MARKETS = sorted(set(m for markets in CROP_MARKETS.values() for m in markets))
+
+# =============================================================================
+# FORECAST HORIZONS
+# =============================================================================
+
+# Label -> Days mapping for UI
 HORIZONS = {
     '1 Week': 7,
     '2 Weeks': 14,
-    '1 Month': 30,
-    '2 Months': 60,
-    '3 Months': 84
+    '1 Month': 30
 }
+
+# Forecast horizons in days (for models)
+FORECAST_HORIZONS = [7, 14, 30]
+
+# =============================================================================
+# MODEL CONFIGURATIONS
+# =============================================================================
+
+# Price model configurations per crop
+PRICE_MODEL_CONFIG = {
+    'Rice': {
+        'model_type': 'LSTM',
+        'lag_days': 60,
+        'univariate': True,  # Price only, no weather
+    },
+    'Beetroot': {
+        'model_type': 'RandomForest',
+        'lag_days': 7,
+        'univariate': False,  # Price + weather
+    },
+    'Radish': {
+        'model_type': 'RandomForest',
+        'lag_days': 90,
+        'univariate': False,
+    },
+    'Red Onion': {
+        'model_type': 'LightGBM',
+        'lag_days': 45,
+        'univariate': False,
+    }
+}
+
+# Demand model configurations per crop
+DEMAND_MODEL_CONFIG = {
+    'Rice': {
+        'model_type': 'LSTM',
+        'lag_days': 60,
+        'univariate': True,
+    },
+    'Beetroot': {
+        'model_type': 'RandomForest',
+        'lag_days': 7,
+        'univariate': False,
+    },
+    'Radish': {
+        'model_type': 'RandomForest',
+        'lag_days': 90,
+        'univariate': False,
+    },
+    'Red Onion': {
+        'model_type': 'LightGBM',
+        'lag_days': 45,
+        'univariate': False,
+    }
+}
+
+# Weather features used for multivariate models
+WEATHER_FEATURES = ['temp', 'rainfall', 'humidity', 'wind_speed', 'sunshine_hours']
+
+# =============================================================================
+# CROP PROPERTIES
+# =============================================================================
 
 # Perishability (Days until spoiled without storage)
 PERISHABILITY = {
@@ -22,57 +114,44 @@ PERISHABILITY = {
     'Red Onion': 30
 }
 
-# Crop-Market Mapping: Only these markets are valid for each crop
-CROP_MARKETS = {
-    'Rice': [
-        'Colombo',
-        'Anuradhapura',
-        'Moneragala',
-        'Dambulla',
-        'Ampara',
-        'Kandy',
-        'Kurunegala',
-        'Polonnaruwa'
-    ],
-    'Beetroot': [
-        'Colombo',
-        'Thambuththegama',
-        'Bandarawela',
-        'Dambulla',
-        'Kandy',
-        'Nuwara Eliya'  # Standardized spelling
-    ],
-    'Radish': [
-        'Colombo',
-        'Moneragala',
-        'Dambulla',
-        'Kandy',
-        'Meegoda'
-    ],
-    'Red Onion': [
-        'Colombo',
-        'Puttalam',
-        'Mullaittivu',  # Standardized from Mulathiv
-        'Vavuniya',
-        'Batticaloa',
-        'Dambulla',
-        'Embilipitiya',
-        'Jaffna',
-        'Kandy',
-        'Mannar',
-        'Meegoda',
-        'Moneragala',
-        'Nuwara Eliya',  # Standardized spelling
-        'Thambuththegama',
-        'Trincomalee'
-    ]
+# Estimated Model RMSE (for confidence intervals)
+MODEL_RMSE = {
+    'Rice': 15.5,
+    'Beetroot': 22.3,
+    'Radish': 12.8,
+    'Red Onion': 45.2
 }
 
-# Get all unique markets across all crops
-ALL_MARKETS = sorted(set(m for markets in CROP_MARKETS.values() for m in markets))
+# =============================================================================
+# RECOMMENDATION THRESHOLDS
+# =============================================================================
 
+RECOMMENDATION_THRESHOLDS = {
+    'strong_hold': 0.10,    # >= +10% profit change
+    'hold': 0.02,           # +2% to +10%
+    'neutral_upper': 0.02,  # -2% to +2%
+    'neutral_lower': -0.02,
+    'sell': -0.10,          # -2% to -10%
+    'strong_sell': -0.10    # <= -10%
+}
 
-# Sinhala Translations for Crop Names
+# =============================================================================
+# DEFAULT VALUES
+# =============================================================================
+
+# Default Weather Values (Sri Lanka Averages)
+DEFAULT_WEATHER = {
+    'temp': 27.5,
+    'rainfall': 5.0,
+    'humidity': 75.0,
+    'wind_speed': 13.5,
+    'sunshine_hours': 10.5
+}
+
+# =============================================================================
+# SINHALA TRANSLATIONS
+# =============================================================================
+
 CROP_NAMES_SI = {
     'Rice': 'සහල්',
     'Beetroot': 'බීට්රූට්',
@@ -80,37 +159,12 @@ CROP_NAMES_SI = {
     'Red Onion': 'රතු ලූනු'
 }
 
-# Default Weather Values (Sri Lanka Averages)
-DEFAULT_WEATHER = {
-    'temperature_avg_C': 27.5,
-    'rainfall_mm': 5.0,
-    'humidity_percent': 75.0,
-    'wind_speed': 13.5,
-    'sunshine_hours': 10.5
-}
-
-# Sri Lankan Agricultural Seasons
-SEASONS = {
-    'Maha': {'months': [10, 11, 12, 1, 2, 3], 'name_si': 'මහ', 'description': 'Main cultivation season (Oct-Mar)'},
-    'Yala': {'months': [4, 5, 6, 7, 8, 9], 'name_si': 'යල', 'description': 'Secondary season (Apr-Sep)'}
-}
-
-# Major Sri Lankan Festivals (approximate dates - vary by lunar calendar)
-FESTIVALS = {
-    'Sinhala New Year': {'month': 4, 'day': 14, 'impact': 'high', 'name_si': 'අලුත් අවුරුද්ද'},
-    'Vesak': {'month': 5, 'day': 15, 'impact': 'high', 'name_si': 'වෙසක්'},
-    'Poson': {'month': 6, 'day': 15, 'impact': 'medium', 'name_si': 'පොසොන්'},
-    'Esala': {'month': 7, 'day': 15, 'impact': 'medium', 'name_si': 'ඇසළ'},
-    'Christmas': {'month': 12, 'day': 25, 'impact': 'high', 'name_si': 'නත්තල'},
-    'Thai Pongal': {'month': 1, 'day': 14, 'impact': 'medium', 'name_si': 'තෛ පොංගල්'}
-}
-
-# Harvest Periods by Crop
-HARVEST_PERIODS = {
-    'Rice': [3, 4, 8, 9],  # March-April (Maha), Aug-Sep (Yala)
-    'Beetroot': [7, 8, 9],
-    'Radish': [6, 7, 8],
-    'Red Onion': [6, 7, 8]
+RECOMMENDATION_NAMES_SI = {
+    'STRONG HOLD': 'ශක්තිමත් රඳවා ගන්න',
+    'HOLD': 'රඳවා ගන්න',
+    'NEUTRAL': 'මධ්‍යස්ථ',
+    'SELL': 'විකුණන්න',
+    'STRONG SELL': 'වහාම විකුණන්න'
 }
 
 # UI Translations
@@ -148,7 +202,21 @@ TRANSLATIONS = {
         'demand_forecast': 'ඉල්ලුම අනාවැකිය',
         'sell_now': 'දැන් විකුණන්න',
         'hold': 'රඳවා තබා ගන්න',
-        'wait': 'රඳවා තබා ගන්න', # Using same word for Wait/Hold in simple context or specific word
+        'wait': 'රඳවා තබා ගන්න',
         'days': 'දින'
     }
 }
+
+# =============================================================================
+# FILE PATHS (Relative to deployment package)
+# =============================================================================
+
+# Model directories
+MODELS_DIR = 'models/saved_models'
+PRICE_MODELS_DIR = f'{MODELS_DIR}/price forcasting'
+DEMAND_MODELS_DIR = f'{MODELS_DIR}/demand forcasting'
+
+# Data directory
+DATA_DIR = 'data'
+PRICE_DATA_FILE = f'{DATA_DIR}/full_history_features_real_weather.csv'
+DEMAND_DATA_FILE = f'{DATA_DIR}/full_history_demand_data.csv'

@@ -22,6 +22,13 @@ from config import (
     CROP_NAMES_SI, TRANSLATIONS, DEFAULT_WEATHER, CROP_MARKETS
 )
 
+# Data fetcher for automated updates
+try:
+    from data_fetcher import fetch_week, update_this_week, update_since_date, fetch_weather
+    HAS_DATA_FETCHER = True
+except ImportError:
+    HAS_DATA_FETCHER = False
+
 # ============================================================================
 # PAGE CONFIG
 # ============================================================================
@@ -58,55 +65,25 @@ st.markdown("""
 # ============================================================================
 # DATA PATH
 # ============================================================================
-# Use robust pathing
+# Use robust pathing - deployment package is self-contained
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(BASE_DIR)
-DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
+PROJECT_ROOT = BASE_DIR  # deployment_package is the root
+DATA_DIR = os.path.join(BASE_DIR, 'data')
+MODELS_DIR = os.path.join(BASE_DIR, 'models', 'saved_models')
+
 # Main historical data file (Price + Weather)
 DATA_PATH = os.path.join(DATA_DIR, 'full_history_features_real_weather.csv')
-# Demand data file (Volume)
-DEMAND_DATA_PATH = os.path.join(DATA_DIR, 'full_history_demand_data.csv')
 
 # ============================================================================
 # LOAD DATA
 # ============================================================================
 @st.cache_data
 def load_data():
-    """Load market data from CSV, merging Price/Weather with Volume."""
+    """Load market data from CSV (Price + Weather)."""
     if os.path.exists(DATA_PATH):
         try:
-            # 1. Load Main Data (Price + Weather)
             df = pd.read_csv(DATA_PATH)
             df['Date'] = pd.to_datetime(df['Date'])
-            
-            # 2. Load Volume Data if available
-            if os.path.exists(DEMAND_DATA_PATH):
-                try:
-                    df_vol = pd.read_csv(DEMAND_DATA_PATH)
-                    # Keep only keys and quantity
-                    if 'quantity_tonnes' in df_vol.columns:
-                         vol_cols = ['Date', 'market', 'item', 'quantity_tonnes']
-                         # Filter to exist columns
-                         vol_cols = [c for c in vol_cols if c in df_vol.columns]
-                         df_vol = df_vol[vol_cols]
-                         df_vol['Date'] = pd.to_datetime(df_vol['Date'])
-                         
-                         # Merge
-                         df = pd.merge(df, df_vol, on=['Date', 'market', 'item'], how='left')
-                except Exception as e:
-                    st.warning(f"Could not load extra volume data: {e}")
-
-            # Map column names if needed
-            if 'quantity_tonnes' in df.columns:
-                df = df.rename(columns={'quantity_tonnes': 'volume_MT'})
-            
-            # Fallback if volume still missing (e.g. merge failed or file missing)
-            if 'volume_MT' not in df.columns:
-                 # Create dummy volume for app stability if absolutely necessary, 
-                 # or let it fail but with better message? 
-                 # Better to fill with default to prevent crash
-                 df['volume_MT'] = 10.0 
-
             return df
         except Exception as e:
             st.error(f"Error reading data: {e}")
@@ -169,10 +146,67 @@ with st.sidebar:
     # Mode selection
     mode = st.radio(
         "Mode",
-        options=['📊 Get Prediction', '📝 Add Daily Data', '📈 View Data', '🔄 Retrain Models', '⚙️ Settings'],
+        options=['📊 Get Prediction', '📈 View Data', '🔄 Retrain Models', '⚙️ Settings'],
         index=0
     )
     
+    st.markdown("---")
+    
+    # Quick Data Update Button
+    st.markdown("### 📥 Update Data")
+    if HAS_DATA_FETCHER:
+        if st.button("🔄 Fetch Latest Week", use_container_width=True):
+            with st.spinner("Checking for new data..."):
+                try:
+                    today = datetime.now()
+                    
+                    # Load current data to check last date
+                    current_df = load_data()
+                    
+                    if current_df.empty:
+                        st.warning("⚠️ No existing data. Please load initial dataset first.")
+                    else:
+                        last_data_date = current_df['Date'].max()
+                        
+                        # Calculate the last completed week
+                        # HARTI publishes data after the week ends (usually Monday)
+                        # So we should only fetch weeks where the end date has passed
+                        days_since_last = (today - last_data_date).days
+                        
+                        if days_since_last < 7:
+                            st.info(f"✅ Data is up to date! Last entry: {last_data_date.strftime('%Y-%m-%d')}")
+                            st.info(f"📅 Next update available after: {(last_data_date + timedelta(days=7)).strftime('%Y-%m-%d')}")
+                        else:
+                            # There's at least one week of missing data - fetch it
+                            # Calculate which week to fetch (the week after last data)
+                            fetch_date = last_data_date + timedelta(days=7)
+                            year = fetch_date.year
+                            week = fetch_date.isocalendar()[1]
+                            
+                            # Get last prices for fallback
+                            last_week = current_df[current_df['Date'] >= (last_data_date - timedelta(days=7))]
+                            last_prices = None
+                            if not last_week.empty:
+                                last_prices = last_week[['market', 'item', 'price']].drop_duplicates()
+                            
+                            st.info(f"📥 Fetching Week {week} of {year}...")
+                            data = fetch_week(year, week, last_prices)
+                            
+                            if not data.empty:
+                                df_updated = pd.concat([current_df, data], ignore_index=True)
+                                df_updated = df_updated.drop_duplicates(subset=['Date', 'market', 'item'], keep='last')
+                                df_updated = df_updated.sort_values(['Date', 'market', 'item']).reset_index(drop=True)
+                                save_data(df_updated)
+                                st.success(f"✅ Week {week} data added! ({len(data)} records)")
+                                st.rerun()
+                            else:
+                                st.warning("⚠️ No data available for that week yet")
+                except Exception as e:
+                    st.error(f"❌ {e}")
+    else:
+        st.warning("Install pdfplumber")
+    
+    st.markdown("---")
     st.info("Yield Sync v2.0")
 
 # ============================================================================
@@ -187,243 +221,9 @@ st.markdown(f"<div class='sub-header'>{lang['subtitle']}</div>", unsafe_allow_ht
 df = load_data()
 
 # ============================================================================
-# MODE: ADD DAILY DATA
-# ============================================================================
-if mode == '📝 Add Daily Data':
-    st.subheader(" Add New Daily Market Data")
-    
-    # Get the next date to add
-    next_date = get_next_entry_date(df)
-    last_date = get_last_entry_date(df)
-    
-    # Show status
-    if last_date:
-        current_sys_date = datetime.now().date()
-        days_lag = (current_sys_date - last_date).days
-        
-        status_color = "#4caf50" if days_lag <= 0 else "#f44336"
-        status_text = "✅ Up to Date" if days_lag <= 0 else f"⚠️ Missing {days_lag} Days of Data"
-        
-        st.markdown(f"""
-        <div class='next-date-box'>
-            <h3>📅 Data Status</h3>
-            <div style="display: flex; justify-content: space-around; align-items: center; margin-bottom: 10px;">
-                <div>
-                    <p style="margin: 0; color: #666; font-size: 0.9rem;">Real-World Date</p>
-                    <p style="margin: 0; font-weight: bold; font-size: 1.1rem;">{current_sys_date.strftime('%Y-%m-%d')}</p>
-                </div>
-                <div style="font-size: 2rem;">👉</div>
-                <div>
-                    <p style="margin: 0; color: #666; font-size: 0.9rem;">Last Data Entry</p>
-                    <p style="margin: 0; font-weight: bold; font-size: 1.1rem;">{last_date.strftime('%Y-%m-%d')}</p>
-                </div>
-            </div>
-            <div style="background-color: {status_color}; color: white; padding: 5px; border-radius: 5px; font-weight: bold; margin-top: 5px;">
-                {status_text}
-            </div>
-            <p style="margin-top: 10px;"><strong>Next date to add:</strong> <span style='color: #1976D2; font-size: 1.5rem; font-weight: bold;'>{next_date.strftime('%Y-%m-%d')}</span></p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.info("📅 No data yet. Starting from 2025-01-01")
-    
-    st.markdown("---")
-    
-    # Tabs for Manual vs Bulk
-    tab1, tab2 = st.tabs(["✍️ Manual Entry", "📂 Bulk Upload (Automated)"])
-
-    # --- TAB 1: MANUAL ENTRY ---
-    with tab1:
-        # Fixed date (next sequential date)
-        entry_date = next_date
-        st.markdown(f"### 📆 Adding data for: **{entry_date.strftime('%Y-%m-%d')}**")
-        
-        # Step 1: Select Crop FIRST
-        st.markdown("### 🌾 Step 1: Select Crop")
-        selected_crop = st.selectbox(
-            "Crop",
-            options=TARGET_CROPS,
-            format_func=lambda x: f"{x} / {CROP_NAMES_SI.get(x, x)}",
-            key="manual_crop"
-        )
-        
-        # Step 2: Show only markets valid for selected crop
-        st.markdown("### 📍 Step 2: Select Market")
-        st.info(f"Showing {len(CROP_MARKETS[selected_crop])} markets available for **{selected_crop}**")
-        
-        crop_valid_markets = sorted(CROP_MARKETS[selected_crop])
-        market = st.selectbox(
-            "Market",
-            options=crop_valid_markets,
-            key="manual_market"
-        )
-        
-        # Weather data (REQUIRED for predictions)
-        st.markdown("### 🌤️ Step 3: Weather Data (Required)")
-        weather_cols = st.columns(5)
-        with weather_cols[0]:
-            temperature = st.number_input("Temperature (°C)", value=float(DEFAULT_WEATHER['temperature_avg_C']), step=0.5)
-        with weather_cols[1]:
-            rainfall = st.number_input("Rainfall (mm)", value=float(DEFAULT_WEATHER['rainfall_mm']), step=0.5)
-        with weather_cols[2]:
-            humidity = st.number_input("Humidity (%)", value=float(DEFAULT_WEATHER['humidity_percent']), step=1.0)
-        with weather_cols[3]:
-            wind_speed = st.number_input("Wind Speed (km/h)", value=float(DEFAULT_WEATHER['wind_speed']), step=0.5)
-        with weather_cols[4]:
-            sunshine_hours = st.number_input("Sunshine (hours)", value=float(DEFAULT_WEATHER['sunshine_hours']), step=0.5)
-        
-        # Step 4: Price and Volume entry for selected crop
-        st.markdown(f"### 💰 Step 4: Enter Price and Volume for {selected_crop}")
-        
-        # Get last known price for reference
-        last_price = None
-        if not df.empty:
-            # Get last price for this market specifically if possible
-            crop_df = df[(df['item'] == selected_crop) & (df['market'] == market)].sort_values('Date')
-            if not crop_df.empty:
-                last_price = crop_df.iloc[-1]['price']
-            else:
-                # Fallback to any market
-                crop_df_any = df[df['item'] == selected_crop].sort_values('Date')
-                if not crop_df_any.empty:
-                    last_price = crop_df_any.iloc[-1]['price']
-        
-        default_price = last_price if last_price else 100.0
-        
-        cols = st.columns(3)
-        with cols[0]:
-            price = st.number_input(
-                f"Price (LKR/kg)",
-                min_value=0.0, max_value=5000.0, value=float(default_price), step=1.0,
-                key=f"price_{selected_crop}_{market}"
-            )
-        with cols[1]:
-            volume = st.number_input(
-                f"Volume (MT)",
-                min_value=0.0, max_value=2000.0, value=10.0, step=0.1,
-                key=f"volume_{selected_crop}_{market}"
-            )
-        with cols[2]:
-            if last_price:
-                change = ((price - last_price) / last_price) * 100
-                st.metric("vs Last Entry", f"{change:+.1f}%")
-            else:
-                st.write("")
-        
-        crop_data = {selected_crop: {'price': price, 'volume': volume}}
-        
-        st.markdown("---")
-        
-
-        # Save button
-        if st.button(f"💾 Save Data for {entry_date.strftime('%Y-%m-%d')}", type="primary", use_container_width=True):
-            new_rows = []
-            for crop, data in crop_data.items():
-                new_row = {
-                    'Date': pd.Timestamp(entry_date),
-                    'market': market,
-                    'item': crop,
-                    'price': data['price'],
-                    'volume_MT': data['volume'], # Map volume to volume_MT
-                    'temp': temperature,
-                    'rainfall': rainfall,
-                    'humidity': humidity,
-                    'wind_speed': wind_speed,
-                    'sunshine_hours': sunshine_hours,
-                    'is_public_holiday': 0, # Default
-                    'demand_multiplier': 1.0, # Default
-                    # Add quantity_tonnes if your model needs it explicitly
-                    'quantity_tonnes': data['volume'] 
-                }
-                new_rows.append(new_row)
-            
-            new_df = pd.DataFrame(new_rows)
-            if not df.empty:
-                df_updated = pd.concat([df, new_df], ignore_index=True)
-            else:
-                df_updated = new_df
-            
-            # Remove duplicates if any for same date/market/item
-            df_updated = df_updated.drop_duplicates(subset=['Date', 'market', 'item'], keep='last')
-            df_updated = df_updated.sort_values(['Date', 'market', 'item']).reset_index(drop=True)
-            
-            save_data(df_updated)
-            
-            st.success(f"✅ Data saved for {entry_date.strftime('%Y-%m-%d')} at {market}!")
-            st.rerun()
-
-    # --- TAB 2: BULK UPLOAD ---
-    with tab2:
-        st.info("📂 Upload a CSV or Excel file to automatically add multiple days/records.")
-        
-        uploaded_file = st.file_uploader("Upload File", type=['csv', 'xlsx'])
-        
-        if uploaded_file:
-            try:
-                if uploaded_file.name.endswith('.csv'):
-                    upload_df = pd.read_csv(uploaded_file)
-                else:
-                    upload_df = pd.read_excel(uploaded_file)
-                
-                # Validation and mapping
-                st.write("First 5 rows of uploaded data:", upload_df.head())
-                
-                # Check critical cols - loosen requirements to find similar names
-                # ... [Logic similar to provided snippet] ...
-                
-                # For brevity, implementing essential check
-                required_cols = ['Date', 'item', 'price']
-                missing = [c for c in required_cols if c not in upload_df.columns and c.lower() not in [x.lower() for x in upload_df.columns]]
-                
-                if missing:
-                     st.error(f"❌ Missing columns: {missing}. Please ensure file has Date, Item, Price.")
-                else:
-                    # Normalize cols
-                    upload_df.columns = [c.lower() for c in upload_df.columns]
-                    # Rename back to standard
-                    rename_map = {'date': 'Date', 'item': 'item', 'price': 'price', 'volume': 'volume_MT', 'qty': 'volume_MT'}
-                    upload_df = upload_df.rename(columns=rename_map)
-                    
-                    upload_df['Date'] = pd.to_datetime(upload_df['Date'])
-                    
-                    if st.button("🚀 Process & Save Batch"):
-                        # Fill defaults
-                        defaults = {
-                            'market': 'Colombo',
-                            'volume_MT': 10.0,
-                            'quantity_tonnes': 10.0,
-                            'temp': DEFAULT_WEATHER['temperature_avg_C'],
-                            'rainfall': DEFAULT_WEATHER['rainfall_mm'],
-                            'humidity': DEFAULT_WEATHER['humidity_percent'],
-                            'wind_speed': DEFAULT_WEATHER['wind_speed'],
-                            'sunshine_hours': DEFAULT_WEATHER['sunshine_hours'],
-                            'is_public_holiday': 0, 'demand_multiplier': 1.0
-                        }
-                        for col, val in defaults.items():
-                            if col not in upload_df.columns:
-                                upload_df[col] = val
-                        
-                        # Ensure quantity_tonnes matches volume if missing
-                        if 'quantity_tonnes' not in upload_df.columns and 'volume_MT' in upload_df.columns:
-                             upload_df['quantity_tonnes'] = upload_df['volume_MT']
-
-                        if not df.empty:
-                            df_updated = pd.concat([df, upload_df], ignore_index=True)
-                        else:
-                            df_updated = upload_df
-                        
-                        df_updated = df_updated.drop_duplicates(subset=['Date', 'market', 'item'], keep='last')
-                        df_updated = df_updated.sort_values(['Date', 'market', 'item']).reset_index(drop=True)
-                        save_data(df_updated)
-                        st.success(f"✅ Successfully added {len(upload_df)} records!")
-                        
-            except Exception as e:
-                st.error(f"Error reading file: {e}")
-
-# ============================================================================
 # MODE: VIEW DATA
 # ============================================================================
-elif mode == '📈 View Data':
+if mode == '📈 View Data':
     st.subheader("📈 View Historical Data")
     
     if df.empty:
@@ -469,8 +269,8 @@ elif mode == '📈 View Data':
             
             # Chart
             if not filtered_df.empty:
-                # Aggregate to avoid plotting issues
-                chart_df = filtered_df.groupby(['Date', 'item']).agg({'price': 'mean', 'volume_MT': 'mean'}).reset_index()
+                # Aggregate to avoid plotting issues - only aggregate price
+                chart_df = filtered_df.groupby(['Date', 'item'])['price'].mean().reset_index()
                 
                 fig = go.Figure()
                 for crop in chart_df['item'].unique():
@@ -494,7 +294,7 @@ elif mode == '📈 View Data':
             
             # Recent entries table
             st.markdown("### Recent Entries (Last 50)")
-            display_cols = ['Date', 'market', 'item', 'price', 'volume_MT']
+            display_cols = ['Date', 'market', 'item', 'price']
             st.dataframe(
                 filtered_df[display_cols].sort_values('Date', ascending=False).head(50),
                 use_container_width=True
@@ -516,11 +316,10 @@ elif mode == '📈 View Data':
                     recent_df = crop_df[crop_df['Date'] >= (latest_date - pd.Timedelta(days=7))]
                     
                     market_summary = recent_df.groupby('market').agg({
-                        'price': ['mean', 'min', 'max'],
-                        'volume_MT': 'sum'
+                        'price': ['mean', 'min', 'max']
                     }).reset_index()
                     
-                    market_summary.columns = ['Market', 'Avg Price', 'Min Price', 'Max Price', 'Total Volume']
+                    market_summary.columns = ['Market', 'Avg Price', 'Min Price', 'Max Price']
                     market_summary = market_summary.sort_values('Avg Price', ascending=False)
                     
                     # Display as metrics
@@ -580,8 +379,7 @@ elif mode == '🔄 Retrain Models':
     - When prediction accuracy seems to decrease
     
     **What happens:**
-    - LSTM demand models will be retrained with all accumulated data
-    - LightGBM price models will be updated
+    - Price models will be retrained with all accumulated data
     - This may take 5-10 minutes
     """)
     
@@ -635,8 +433,7 @@ elif mode == '🔄 Retrain Models':
                 
                 results = retrain_models(
                     price_data_path=DATA_PATH,
-                    demand_data_path=DEMAND_DATA_PATH,
-                    save_dir=os.path.join(PROJECT_ROOT, 'models', 'saved_models'),
+                    save_dir=MODELS_DIR,
                     progress_callback=progress_callback
                 )
                 
@@ -645,19 +442,6 @@ elif mode == '🔄 Retrain Models':
                 # Display results
                 with results_container:
                     st.success("🎉 Model retraining completed successfully!")
-                    
-                    # Show demand model results
-                    st.markdown("### 📈 Demand Model Results")
-                    demand_cols = st.columns(4)
-                    for i, (crop, metrics) in enumerate(results.get('demand_models', {}).items()):
-                        with demand_cols[i % 4]:
-                            if 'error' in metrics:
-                                st.error(f"**{crop}**: {metrics['error']}")
-                            else:
-                                st.metric(
-                                    label=crop,
-                                    value=f"MAE: {metrics.get('mae', 'N/A'):.2f}" if isinstance(metrics.get('mae'), (int, float)) else "Trained"
-                                )
                     
                     # Show price model results
                     st.markdown("### 💰 Price Model Results")
@@ -797,7 +581,8 @@ else:
             
             # Determine the max selectable date (today or last data date, whichever is earlier)
             today = datetime.now().date()
-            max_date = min(today, last_data_date)
+            # Use last available data date (may be ahead if using last week's avg prices)
+            max_date = last_data_date
             
             # Default to the last data date
             default_date = last_data_date
@@ -807,7 +592,7 @@ else:
                 value=default_date,
                 min_value=df['Date'].min().date() if not df.empty else today,
                 max_value=max_date,
-                help="Select the date for which you want predictions. Data must be available up to this date."
+                help="Select the date for which you want predictions. Uses last week's avg prices until new HARTI data."
             )
         else:
             selected_date = datetime.now().date()
@@ -866,6 +651,13 @@ else:
     
     # Logic to show results if button clicked OR valid result in session
     if get_rec:
+        # Get real historical data
+        crop_df = df[(df['item'] == crop) & (df['market'] == market)].sort_values('Date')
+        
+        if crop_df.empty:
+            st.warning(f"No specific data for {crop} in {market}. Using average of all markets.")
+            crop_df = df[df['item'] == crop].groupby('Date')['price'].mean().reset_index().sort_values('Date')
+        
         # Validate selected date has data
         if selected_date > last_data_date:
             st.error(f"❌ No data available for {selected_date.strftime('%Y-%m-%d')}. Latest data is from {last_data_date.strftime('%Y-%m-%d')}.")
@@ -875,188 +667,293 @@ else:
             
             if crop_df.empty:
                 st.warning(f"No specific data for {crop} in {market}. Using average of all markets.")
-                crop_df = df[(df['item'] == crop) & (df['Date'] <= pd.Timestamp(selected_date))].groupby('Date').agg({'price':'mean', 'volume_MT':'mean'}).reset_index().sort_values('Date')
+                crop_df = df[(df['item'] == crop) & (df['Date'] <= pd.Timestamp(selected_date))].groupby('Date')['price'].mean().reset_index().sort_values('Date')
             
             # Need at least some history
             if crop_df.empty:
                 st.error("No historical data found for this crop up to the selected date.")
             else:
-                 # Take last 60 days before selected date
-                 recent = crop_df.tail(60)
-                 price_history = recent['price'].tolist()
-                 volume_history = recent['volume_MT'].tolist()
+                 # Get current price
+                 current_price = float(crop_df.iloc[-1]['price'])
                  
                  with st.spinner('🔄 Analyzing with real historical data...'):
-                    result = predictor.get_recommendation(
+                    # Predict prices for all horizons (7, 14, 30 days)
+                    predictions = {}
+                    primary_horizon = days_since_harvest if days_since_harvest > 0 else 7
+                    
+                    for horizon in HORIZONS.keys():  # '7day', '14day', '30day'
+                        horizon_days = HORIZONS[horizon]
+                        price_result_h = predictor.predict_price(
+                            data=df[df['Date'] <= pd.Timestamp(selected_date)],
+                            crop=crop,
+                            market=market,
+                            days_ahead=horizon_days
+                        )
+                        if 'error' not in price_result_h:
+                            predictions[horizon] = price_result_h['predicted_price']
+                    
+                    # Get primary prediction for recommendation
+                    price_result = predictor.predict_price(
+                        data=df[df['Date'] <= pd.Timestamp(selected_date)],
                         crop=crop,
-                        price_history=price_history,
-                        volume_history=volume_history,
-                        current_date=datetime.combine(selected_date, datetime.min.time()),
-                        quantity_kg=quantity_kg,
-                        days_since_harvest=days_since_harvest
+                        market=market,
+                        days_ahead=primary_horizon
                     )
+                    
+                    if 'error' in price_result:
+                        st.error(f"Prediction error: {price_result['error']}")
+                        result = {
+                            'decision': 'UNKNOWN',
+                            'predicted_price': current_price,
+                            'current_price': current_price,
+                            'price_change_percent': 0,
+                            'reasoning': price_result['error'],
+                            'confidence': 0,
+                            'predictions': predictions,
+                            'expected_profit_per_kg': 0,
+                            'expected_profit_total': 0,
+                            'best_price': current_price,
+                            'best_time': 'Now',
+                            'best_hold_days': 0,
+                            'shelf_life_remaining': PERISHABILITY.get(crop, 30),
+                            'perishability': 'Medium'
+                        }
+                    else:
+                        predicted_price = price_result['predicted_price']
+                        
+                        # Get recommendation based on prices
+                        rec_result = predictor.get_recommendation(
+                            crop=crop,
+                            current_price=current_price,
+                            predicted_price=predicted_price,
+                            days_ahead=price_result.get('days_ahead', 7),
+                            quantity_kg=quantity_kg
+                        )
+                        
+                        # Calculate additional display values
+                        shelf_life = PERISHABILITY.get(crop, 30)
+                        days_harvest = days_since_harvest if days_since_harvest >= 0 else 0
+                        shelf_remaining = max(0, shelf_life - days_harvest)
+                        
+                        # Determine perishability category
+                        if shelf_life <= 7:
+                            perish_cat = 'High'
+                        elif shelf_life <= 30:
+                            perish_cat = 'Medium'
+                        else:
+                            perish_cat = 'Low'
+                        
+                        # Find best horizon from predictions
+                        best_horizon = '7day'
+                        best_price_val = predicted_price
+                        if predictions:
+                            best_horizon = max(predictions.keys(), key=lambda h: predictions[h])
+                            best_price_val = predictions[best_horizon]
+                        
+                        # Calculate profit per kg
+                        profit_per_kg = predicted_price - current_price
+                        profit_total = profit_per_kg * quantity_kg
+                        
+                        # Determine best time text
+                        if 'HOLD' in rec_result.get('decision', ''):
+                            best_time_text = f"Hold for {HORIZONS.get(best_horizon, 7)} days"
+                            best_hold = HORIZONS.get(best_horizon, 7)
+                        else:
+                            best_time_text = "Sell Now"
+                            best_hold = 0
+                        
+                        # Combine results with predictions for chart
+                        result = {
+                            **price_result,
+                            **rec_result,
+                            'predictions': predictions,
+                            'confidence': 75,
+                            'expected_profit_per_kg': round(profit_per_kg, 2),
+                            'expected_profit_total': round(profit_total, 2),
+                            'best_price': round(best_price_val, 2),
+                            'best_time': best_time_text,
+                            'best_hold_days': best_hold,
+                            'shelf_life_remaining': shelf_remaining,
+                            'perishability': perish_cat
+                        }
+                    
                     st.session_state['last_result'] = result
                     st.session_state['last_crop'] = crop
                     st.session_state['last_selected_date'] = selected_date
-    
-    if 'last_result' in st.session_state:
-        result = st.session_state['last_result']
-        
-        # Show which date the prediction is for
-        prediction_date = st.session_state.get('last_selected_date', last_data_date)
-        if prediction_date:
-            st.info(f"📊 **Showing predictions based on data up to:** {prediction_date.strftime('%Y-%m-%d')}")
-        
-        # Display Results
-        current_price = result.get('current_price', 0)
-        
-        # URGENT WARNINGS - Show first if critical
-        urgency_warning = result.get('urgency_warning', '')
-        if urgency_warning:
-            if '🔴 URGENT' in urgency_warning or 'CRITICAL' in urgency_warning:
-                st.error(urgency_warning)
-            elif '⚠️ WARNING' in urgency_warning:
-                st.warning(urgency_warning)
-        
-        # Decision display
-        decision = result['decision']
-        if 'SELL' in decision:
-            decision_class = 'decision-sell'
-            decision_emoji = '🔴'
-        elif 'HOLD' in decision:
-            decision_class = 'decision-hold'
-            decision_emoji = '🟢'
-        else:
-            decision_class = 'decision-wait'
-            decision_emoji = '🟡'
-        
-        # Top metrics
-        col1, col2, col3, col4, col5 = st.columns(5)
-        
-        with col1:
-            decision_text = result['decision']
-            if language == 'si':
-                if 'SELL' in decision_text:
-                    decision_text = lang['sell_now']
-                elif 'HOLD' in decision_text:
-                    decision_text = f"{lang['hold']} {result['best_hold_days']} {lang['days']}"
-                else:
-                    decision_text = lang['wait']
-            st.metric(lang['decision'], f"{decision_emoji} {decision_text}")
-        
-        with col2:
-            st.metric(lang['confidence'], f"{result.get('confidence',0):.0f}%")
-        
-        with col3:
-            # Shelf Life Remaining
-            shelf_life = result.get('shelf_life_remaining', 'N/A')
-            perishability = result.get('perishability', 'Medium')
-            if isinstance(shelf_life, int):
-                shelf_emoji = '🟢' if shelf_life > 7 else ('🟡' if shelf_life > 3 else '🔴')
-                st.metric(f"{shelf_emoji} Shelf Life", f"{shelf_life} days", f"({perishability})")
-            else:
-                st.metric("Shelf Life", "N/A")
-        
-        with col4:
-            profit = result.get('expected_profit_per_kg', 0)
-            st.metric(f"{lang['expected_profit']}/kg", f"{profit:.2f} LKR", f"{'+' if profit > 0 else ''}{profit:.2f}")
-        
-        with col5:
-            st.metric("Total Profit", f"{result.get('expected_profit_total',0):.0f} LKR")
-        
-        # Harvest & Seasonal Context
-        st.markdown("---")
-        context_row1 = st.columns([1, 1])
-        
-        with context_row1[0]:
-            # Harvest season context
-            harvest_ctx = result.get('harvest_context', '')
-            if harvest_ctx:
-                if '⚠️' in harvest_ctx:
-                    st.warning(harvest_ctx)
-                else:
-                    st.success(harvest_ctx)
-            
-            # Season info
-            season_info = result.get('season', {})
-            if season_info:
-                season_name = season_info.get('name', 'N/A')
-                season_desc = season_info.get('description', '')
-                st.info(f"🌾 **Growing Season:** {season_name} - {season_desc}")
-        
-        with context_row1[1]:
-            # Crop age tracking
-            days_harvest = result.get('days_since_harvest', 0)
-            if days_harvest == -1:
-                # Not yet harvested
-                st.info(f"🌱 **Planning Mode:** Not yet harvested")
-            elif days_harvest > 0:
-                age_emoji = '🆕' if days_harvest <= 3 else ('⏰' if days_harvest <= 7 else '⚠️')
-                st.info(f"{age_emoji} **Crop Age:** {days_harvest} days since harvest")
-            else:
-                # Just harvested today
-                st.success(f"🆕 **Fresh Harvest:** Just harvested today!")
-            
-            # Trend Signal
-            trend = result.get('trend_signal', 'Steady →')
-            st.info(f"📈 **Price Trend:** {trend}")
-        
-        # Festival Context
-        festivals = result.get('upcoming_festivals', [])
-        if festivals:
-            st.markdown("---")
-            st.markdown("### 🎉 Upcoming Festivals")
-            festival_text = " | ".join([
-                f"**{f['name']}** in {f['days_until']} days (Impact: {f['impact']})"
-                for f in festivals[:2]  # Show max 2 festivals
-            ])
-            st.warning(festival_text)
-        
-        st.markdown("---")
-        
-        # Charts
-        col_price, col_demand = st.columns(2)
-        
-        with col_price:
-            st.subheader(f"📈 {lang['price_forecast']}")
-            predictions = result.get('predictions', {})
-            if predictions:
-                horizons = list(predictions.keys())
-                prices = [predictions[h] for h in horizons]
-                days = [HORIZONS[h] for h in horizons]
-                
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=[0], y=[current_price], mode='markers', name='Now', marker=dict(size=15, color='red', symbol='star')))
-                fig.add_trace(go.Scatter(x=[0] + days, y=[current_price] + prices, mode='lines+markers', name='Forecast', line=dict(color='#2E7D32', width=3)))
-                fig.update_layout(xaxis_title="Days Ahead", yaxis_title="Price (LKR/kg)", template='plotly_white', height=350, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
-        
-        with col_demand:
-            st.subheader(f"📦 {lang['demand_forecast']}")
-            demand_predictions = result.get('demand_predictions', {})
-            if demand_predictions:
-                horizons = list(demand_predictions.keys())
-                volumes = [demand_predictions[h] for h in horizons]
-                days = [HORIZONS[h] for h in horizons]
-                
-                fig = go.Figure()
-                fig.add_trace(go.Bar(x=[f"{d}d" for d in days], y=volumes, marker_color='#1976D2', text=[f"{v:.1f}" for v in volumes], textposition='outside'))
-                fig.update_layout(xaxis_title="Horizon", yaxis_title="Volume (MT)", template='plotly_white', height=350)
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                # No demand data available
-                st.warning(f"⚠️ Demand forecast unavailable for {crop}. Models not trained due to insufficient historical data.")
-                st.info("💡 Price forecast is still accurate and can be used for decisions.")
-        
-        # Reasoning
-        st.markdown(f"""
-        <div class='{decision_class}'>
-            <h3>{decision_emoji} {result['decision']}</h3>
-            <p>{result['reasoning']}</p>
-            <p><strong>Best timing:</strong> {result.get('best_time','-')} ({result.get('best_hold_days',0)} days)</p>
-            <p><strong>Expected price:</strong> {result.get('best_price',0):.2f} LKR/kg</p>
-        </div>
-        """, unsafe_allow_html=True)
+                    
+                    # Display results only if we have a valid result
+                    # URGENT WARNINGS - Show first if critical
+                    urgency_warning = result.get('urgency_warning', '')
+                    if urgency_warning:
+                        if '🔴 URGENT' in urgency_warning or 'CRITICAL' in urgency_warning:
+                            st.error(urgency_warning)
+                        elif '⚠️ WARNING' in urgency_warning:
+                            st.warning(urgency_warning)
+                    
+                    # Decision display
+                    decision = result['decision']
+                    if 'SELL' in decision:
+                        decision_class = 'decision-sell'
+                        decision_emoji = '🔴'
+                    elif 'HOLD' in decision:
+                        decision_class = 'decision-hold'
+                        decision_emoji = '🟢'
+                    else:
+                        decision_class = 'decision-wait'
+                        decision_emoji = '🟡'
+                    
+                    # Top metrics
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    
+                    with col1:
+                        decision_text = result['decision']
+                        if language == 'si':
+                            if 'SELL' in decision_text:
+                                decision_text = lang['sell_now']
+                            elif 'HOLD' in decision_text:
+                                decision_text = f"{lang['hold']} {result.get('best_hold_days', 0)} {lang['days']}"
+                            else:
+                                decision_text = lang['wait']
+                        st.metric(lang['decision'], f"{decision_emoji} {decision_text}")
+                    
+                    with col2:
+                        st.metric(lang['confidence'], f"{result.get('confidence',0):.0f}%")
+                    
+                    with col3:
+                        # Shelf Life Remaining
+                        shelf_life = result.get('shelf_life_remaining', 'N/A')
+                        perishability = result.get('perishability', 'Medium')
+                        if isinstance(shelf_life, int):
+                            shelf_emoji = '🟢' if shelf_life > 7 else ('🟡' if shelf_life > 3 else '🔴')
+                            st.metric(f"{shelf_emoji} Shelf Life", f"{shelf_life} days", f"({perishability})")
+                        else:
+                            st.metric("Shelf Life", "N/A")
+                    
+                    with col4:
+                        profit = result.get('expected_profit_per_kg', 0)
+                        if profit >= 0:
+                            st.metric("📈 Price Change/kg", f"+{profit:.2f} LKR", f"Gain if hold", delta_color="normal")
+                        else:
+                            st.metric("📉 Price Change/kg", f"{profit:.2f} LKR", f"Loss if hold", delta_color="inverse")
+                    
+                    with col5:
+                        total = result.get('expected_profit_total', 0)
+                        if total >= 0:
+                            st.metric("Total if Hold", f"+{total:.0f} LKR")
+                        else:
+                            st.metric("Total if Hold", f"{total:.0f} LKR")
+                    
+                    # Profit Comparison Table for all horizons
+                    st.markdown("---")
+                    st.markdown("### 📊 Profit Comparison by Horizon")
+                    
+                    predictions = result.get('predictions', {})
+                    if predictions:
+                        comparison_data = []
+                        for horizon_key, pred_price in predictions.items():
+                            horizon_days = HORIZONS.get(horizon_key, 7)
+                            change = pred_price - current_price
+                            change_pct = (change / current_price * 100) if current_price > 0 else 0
+                            total_change = change * quantity_kg
+                            
+                            # Determine recommendation for this horizon
+                            if change_pct >= 2:
+                                rec = "🟢 HOLD"
+                            elif change_pct <= -2:
+                                rec = "🔴 SELL NOW"
+                            else:
+                                rec = "🟡 NEUTRAL"
+                            
+                            comparison_data.append({
+                                'Horizon': f"{horizon_days} days",
+                                'Predicted Price': f"{pred_price:.2f} LKR/kg",
+                                'Change/kg': f"{change:+.2f} LKR",
+                                'Change %': f"{change_pct:+.1f}%",
+                                f'Total ({quantity_kg}kg)': f"{total_change:+,.0f} LKR",
+                                'Action': rec
+                            })
+                        
+                        comparison_df = pd.DataFrame(comparison_data)
+                        st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+                        
+                        st.caption(f"📍 Current Price: **{current_price:.2f} LKR/kg** | Quantity: **{quantity_kg} kg**")
+                    
+                    # Harvest & Seasonal Context
+                    st.markdown("---")
+                    context_row1 = st.columns([1, 1])
+                    
+                    with context_row1[0]:
+                        # Harvest season context
+                        harvest_ctx = result.get('harvest_context', '')
+                        if harvest_ctx:
+                            if '⚠️' in harvest_ctx:
+                                st.warning(harvest_ctx)
+                            else:
+                                st.success(harvest_ctx)
+                        
+                        # Season info
+                        season_info = result.get('season', {})
+                        if season_info:
+                            season_name = season_info.get('name', 'N/A')
+                            season_desc = season_info.get('description', '')
+                            st.info(f"🌾 **Growing Season:** {season_name} - {season_desc}")
+                    
+                    with context_row1[1]:
+                        # Crop age tracking
+                        days_harvest = result.get('days_since_harvest', 0)
+                        if days_harvest == -1:
+                            # Not yet harvested
+                            st.info(f"🌱 **Planning Mode:** Not yet harvested")
+                        elif days_harvest > 0:
+                            age_emoji = '🆕' if days_harvest <= 3 else ('⏰' if days_harvest <= 7 else '⚠️')
+                            st.info(f"{age_emoji} **Crop Age:** {days_harvest} days since harvest")
+                        else:
+                            # Just harvested today
+                            st.success(f"🆕 **Fresh Harvest:** Just harvested today!")
+                        
+                        # Trend Signal
+                        trend = result.get('trend_signal', 'Steady →')
+                        st.info(f"📈 **Price Trend:** {trend}")
+                    
+                    # Festival Context
+                    festivals = result.get('upcoming_festivals', [])
+                    if festivals:
+                        st.markdown("---")
+                        st.markdown("### 🎉 Upcoming Festivals")
+                        festival_text = " | ".join([
+                            f"**{f['name']}** in {f['days_until']} days (Impact: {f['impact']})"
+                            for f in festivals[:2]  # Show max 2 festivals
+                        ])
+                        st.warning(festival_text)
+                    
+                    st.markdown("---")
+                    
+                    # Charts
+                    # Price Forecast Chart (Full width)
+                    st.subheader(f"📈 {lang['price_forecast']}")
+                    predictions = result.get('predictions', {})
+                    if predictions:
+                        horizons = list(predictions.keys())
+                        prices = [predictions[h] for h in horizons]
+                        days = [HORIZONS[h] for h in horizons]
+                        
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(x=[0], y=[current_price], mode='markers', name='Now', marker=dict(size=15, color='red', symbol='star')))
+                        fig.add_trace(go.Scatter(x=[0] + days, y=[current_price] + prices, mode='lines+markers', name='Forecast', line=dict(color='#2E7D32', width=3)))
+                        fig.update_layout(xaxis_title="Days Ahead", yaxis_title="Price (LKR/kg)", template='plotly_white', height=350, showlegend=False)
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning("No price predictions available for this configuration.")
+                    
+                    # Reasoning
+                    st.markdown(f"""
+                    <div class='{decision_class}'>
+                        <h3>{decision_emoji} {result['decision']}</h3>
+                        <p>{result['reasoning']}</p>
+                        <p><strong>Best timing:</strong> {result.get('best_time','-')} ({result.get('best_hold_days',0)} days)</p>
+                        <p><strong>Expected price:</strong> {result.get('best_price',0):.2f} LKR/kg</p>
+                    </div>
+                    """, unsafe_allow_html=True)
 
 # ============================================================================
 # FOOTER

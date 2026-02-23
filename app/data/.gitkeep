@@ -1,0 +1,4 @@
+# This file keeps the data directory in version control
+# Copy your data files here:
+# - full_history_features_real_weather.csv
+# - full_history_demand_data.csv (optional)
