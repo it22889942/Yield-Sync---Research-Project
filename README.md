@@ -209,7 +209,7 @@ Data Collection
    ↓
 Data Processing
    ↓
-ML Models (Price + Demand Prediction)
+ML Models (Price Prediction)
    ↓
 Decision Logic (SELL / HOLD)
    ↓
