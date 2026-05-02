@@ -12,14 +12,25 @@ import joblib
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from tensorflow.keras.models import load_model
 
-# Add parent dir to path to allow imports from app
+# Add parent dir to path to allow imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.config import CROP_MARKETS
-from app.trainer import PRICE_CONFIG, create_price_features
+# Try both import paths (works whether run from app/ or project root)
+try:
+    from app.config import CROP_MARKETS
+    from app.trainer import PRICE_CONFIG, create_price_features
+except ModuleNotFoundError:
+    from config import CROP_MARKETS
+    from trainer import PRICE_CONFIG, create_price_features
 
-# Define Data Path matches app logic
-DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'full_history_features_real_weather.csv')
+# Define Data Path - detect whether in app/ or project root
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if os.path.basename(BASE_DIR) == 'app':
+    # Running from app directory
+    DATA_PATH = os.path.join(BASE_DIR, 'data', 'full_history_features_real_weather.csv')
+else:
+    # Running from project root
+    DATA_PATH = os.path.join(os.path.dirname(BASE_DIR), 'data', 'full_history_features_real_weather.csv')
 
 def evaluate():
     print("Starting Model Evaluation...")
