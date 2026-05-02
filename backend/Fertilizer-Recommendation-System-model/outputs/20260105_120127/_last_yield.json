@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-01-05T06:39:18.634245Z",
+  "yield_kg_per_acre": 28.15,
+  "inputs_used": [
+    "temperature",
+    "ph",
+    "nitrogen",
+    "phosphorous",
+    "potassium",
+    "soil",
+    "crop",
+    "growth_stage"
+  ],
+  "inputs_payload": {
+    "temperature": 24.7821,
+    "ph": 6.6,
+    "nitrogen": 184,
+    "phosphorous": 80,
+    "potassium": 104,
+    "crop": "Radish",
+    "growth_stage": "flowering"
+  }
+}

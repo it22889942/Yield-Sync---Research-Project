@@ -1,0 +1,12 @@
+{
+  "temperature": "temperature",
+  "ph": "ph",
+  "nitrogen": "nitrogen",
+  "phosphorous": "phosphorous",
+  "potassium": "potassium",
+  "soil": "soil",
+  "crop": "crop",
+  "growth_stage": "growth_stage",
+  "fertilizer": "fertilizer_type",
+  "yield": "yield_kg_per_acre"
+}

@@ -1,0 +1,4 @@
+,best_params,cv_best_f1_macro,test_accuracy,test_f1_macro
+logreg,{'clf__C': 0.1},0.7867934753780454,0.7575757575757576,0.7799551441935547
+rf,"{'clf__max_depth': 8, 'clf__min_samples_split': 2, 'clf__n_estimators': 300}",0.9328384761566252,0.9242424242424242,0.9230508136168515
+gbc,"{'clf__learning_rate': 0.05, 'clf__max_depth': 2, 'clf__n_estimators': 150}",0.9232813378498363,0.9242424242424242,0.926032221984246

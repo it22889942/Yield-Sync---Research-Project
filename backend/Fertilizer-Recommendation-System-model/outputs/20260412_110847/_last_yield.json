@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-04-12T05:45:21.553431Z",
+  "fertilizer_per_acre": 24.75,
+  "inputs_used": [
+    "temperature",
+    "ph",
+    "nitrogen",
+    "phosphorous",
+    "potassium",
+    "soil",
+    "crop",
+    "growth_stage"
+  ],
+  "inputs_payload": {
+    "temperature": 26.06,
+    "ph": 6.81,
+    "nitrogen": 66,
+    "phosphorous": 91,
+    "potassium": 73,
+    "soil": "Sandy loam",
+    "crop": "Radish",
+    "growth_stage": "Vegetative"
+  }
+}

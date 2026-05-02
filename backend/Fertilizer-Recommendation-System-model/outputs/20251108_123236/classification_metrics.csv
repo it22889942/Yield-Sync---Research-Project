@@ -1,0 +1,4 @@
+,best_params,cv_best_f1_macro,test_accuracy,test_f1_macro
+logreg,{'clf__C': 0.1},1.0,1.0,1.0
+rf,"{'clf__max_depth': None, 'clf__min_samples_split': 2, 'clf__n_estimators': 150}",1.0,1.0,1.0
+gbc,"{'clf__learning_rate': 0.05, 'clf__max_depth': 2, 'clf__n_estimators': 150}",1.0,1.0,1.0

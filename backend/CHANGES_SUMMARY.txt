@@ -1,0 +1,140 @@
+====================================================
+CHANGES SUMMARY - Fertilizer Recommendation System
+====================================================
+Dataset: fertilizer_recommendation_dataset.csv
+Date: 2026-04-12
+====================================================
+
+DATASET HEADERS (no change to dataset)
+---------------------------------------
+Temperature, PH, Nitrogen, Phosphorous, Potassium,
+Soil, Crop, Growth_Stage, Fertilizer_Type, Fertilizer_per_acre
+
+
+====================================================
+FILE 1: train.py
+====================================================
+
+CHANGE 1 — Added "fertilizer_per_acre" to yield synonyms list
+  Line  : 86
+  Reason: Dataset regression target column is "Fertilizer_per_acre"
+          (not "Yield_kg_per_acre"), so code must detect it.
+
+  Before:
+    "yield": ["yield", "yield_kg_per_acre", "yield_kg_acre", "yield_kg_ac", "yield_kg",
+              "yield_kg_per_hectare", "yield_t_ha", "yield_kg_ha"],
+
+  After:
+    "yield": ["yield", "yield_kg_per_acre", "yield_kg_acre", "yield_kg_ac", "yield_kg",
+              "yield_kg_per_hectare", "yield_t_ha", "yield_kg_ha", "fertilizer_per_acre"],
+
+NO OTHER LOGIC CHANGED IN train.py
+
+
+====================================================
+FILE 2: app.py
+====================================================
+
+CHANGE 1 — save_last_yield() record key
+  Line  : 63
+  Before: "yield_kg_per_acre": float(yield_kg_per_acre)
+  After : "fertilizer_per_acre": float(yield_kg_per_acre)
+
+CHANGE 2 — /predict response key
+  Line  : 140
+  Before: "yield_kg_per_acre": None
+  After : "fertilizer_per_acre": None
+
+CHANGE 3 — /predict regression result assignment
+  Line  : 156
+  Before: result["yield_kg_per_acre"] = y_pred
+  After : result["fertilizer_per_acre"] = y_pred
+
+CHANGE 4 — / (index) endpoint description
+  Line  : 102
+  Before: "yield_kg_per_acre": "(optional) override..."
+  After : "fertilizer_per_acre": "(optional) override..."
+
+CHANGE 5 — /total-yield endpoint body field + response fields
+  Lines : 174-206
+  Before:
+    - Input field  : "yield_kg_per_acre"
+    - Response keys: "yield_kg_per_acre", "total_yield_kg"
+    - Error message: "...provide yield_kg_per_acre."
+  After:
+    - Input field  : "fertilizer_per_acre"
+    - Response keys: "fertilizer_per_acre", "total_fertilizer_per_acre_kg"
+    - Error message: "...provide fertilizer_per_acre."
+
+NO OTHER LOGIC CHANGED IN app.py
+
+
+====================================================
+API RESPONSE EXAMPLES (after changes)
+====================================================
+
+POST /predict
+  Request:
+    {
+      "temperature": 26,
+      "ph": 6.8,
+      "nitrogen": 66,
+      "phosphorous": 91,
+      "potassium": 73,
+      "soil": "Sandy loam",
+      "crop": "Radish",
+      "growth_stage": "Vegetative"
+    }
+  Response:
+    {
+      "inputs_used": [...],
+      "fertilizer_type": "Urea",
+      "fertilizer_per_acre": 23.0
+    }
+
+POST /total-yield
+  Request:
+    {
+      "area_acres": 3.0,
+      "fertilizer_per_acre": 23.0    <- optional
+    }
+  Response:
+    {
+      "area_acres": 3.0,
+      "fertilizer_per_acre": 23.0,
+      "total_fertilizer_per_acre_kg": 69.0,
+      "source": "provided"
+    }
+
+POST /total-fertilizer
+  Request:
+    {
+      "area_acres": 3.0,
+      "rate_kg_per_acre": 50.0
+    }
+  Response:
+    {
+      "area_acres": 3.0,
+      "rate_kg_per_acre": 50.0,
+      "total_fertilizer_kg": 150.0
+    }
+
+
+====================================================
+HOW TO RUN
+====================================================
+
+1. Train models:
+   python train.py --input fertilizer_recommendation_dataset.csv
+
+2. Start API server:
+   python app.py
+   (Runs on http://localhost:5003)
+
+3. Models saved to:
+   outputs/<timestamp>/best_classifier.joblib   <- Fertilizer_Type prediction
+   outputs/<timestamp>/best_regressor.joblib    <- Fertilizer_per_acre prediction
+
+====================================================
+END
+====================================================

@@ -1,0 +1,5 @@
+,best_params,cv_best_score_name,cv_best_score_value,cv_best_rmse,test_rmse,test_r2
+rf,"{'reg__max_depth': 8, 'reg__min_samples_split': 2, 'reg__n_estimators': 400}",neg_root_mean_squared_error,-6.057201323830467,6.057201323830467,5.870840690603181,0.9632129204076747
+gbr,"{'reg__learning_rate': 0.05, 'reg__max_depth': 2, 'reg__n_estimators': 200}",neg_root_mean_squared_error,-6.0804390084771285,6.0804390084771285,6.0679841580744185,0.9607008101759137
+ridge,{'reg__alpha': 0.1},neg_root_mean_squared_error,-5.897519683376773,5.897519683376773,5.763911923248824,0.9645407625090446
+linreg,{},neg_root_mean_squared_error,-5.897630317799995,5.897630317799995,5.7633498726483605,0.964547677574468
