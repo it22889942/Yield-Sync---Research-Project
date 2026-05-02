@@ -1,0 +1,4 @@
+# Copy trained model files here
+# Price models: .h5 (LSTM), .joblib (RF/LightGBM)
+# Config files: _config.joblib
+# Scalers: _scalers.joblib (for LSTM)

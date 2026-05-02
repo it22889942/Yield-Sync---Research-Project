@@ -63,7 +63,7 @@ except ImportError:
 
 # Import from config or use defaults
 try:
-    from config import CROP_MARKETS, FORECAST_HORIZONS
+    from .config import CROP_MARKETS, FORECAST_HORIZONS
 except ImportError:
     CROP_MARKETS = {
         'Rice': ['Colombo', 'Anuradhapura', 'Dambulla', 'Kandy'],
