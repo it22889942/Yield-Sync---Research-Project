@@ -1,0 +1,52 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+wheels/
+pip-wheel-metadata/
+*.egg
+
+# ===== Virtual envs =====
+.venv/
+venv/
+ENV/
+env/
+
+# ===== Environment files (DO NOT COMMIT) =====
+.env
+.env.*
+!.env.example
+
+# ===== Framework / tools =====
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.log
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+
+# ===== OS / Editor =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ===== Secrets / keys =====
+*.pem
+*.key
+*.p12
+
+# ===== Local data / uploads =====
+uploads/
+data/
+*.sqlite3

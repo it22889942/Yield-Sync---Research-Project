@@ -1,0 +1,97 @@
+{
+  "RICE": {
+    "name": "Rice (Paddy)",
+    "imageAsset": "assets/images/crops/rice.png",
+    "seasonalFactors": [
+      "Maha (Sep–Mar) – Best for rain-fed cultivation.",
+      "Yala (May–Aug) – Suitable with irrigation."
+    ],
+    "zones": ["Wet Zone", "Dry Zone"],
+    "climate": "Requires standing water (2–5 cm) during growth; avoid waterlogging during transplanting.",
+    "fertilizerPerHectare": {
+      "basal": ["Urea 50 kg", "TSP 62 kg", "MOP 50 kg"],
+      "topDressing": ["Urea 50 kg + MOP 25 kg (split after 3–4 weeks and 6–7 weeks)"],
+      "tips": [
+        "Apply fertilizer on moist soil; avoid just before heavy rain.",
+        "Use compost (5–10 tons/ha) for better soil fertility."
+      ]
+    },
+    "cultivationProcess": "Land is first deeply ploughed and leveled, with bunds and irrigation channels prepared as needed. Certified seeds are sown in nursery beds 20–25 days prior to transplanting. Seedlings are transplanted 2–3 per hill in puddled soil, spaced about 20×20 cm. During vegetative growth, water levels of 2–5 cm are maintained, weeds are removed, and fertilizers applied according to stage. Flowering and grain filling require continued water management and pest control. Harvest occurs when grains turn golden yellow, approximately 3–4 months after transplanting, followed by drying before storage."
+  },
+
+  "MAIZE": {
+    "name": "Maize",
+    "imageAsset": "assets/images/crops/maize.png",
+    "seasonalFactors": [
+      "Maha (Oct–Jan) – Best natural rainfall season.",
+      "Yala (May–Aug) – Suitable with irrigation."
+    ],
+    "zones": ["Dry Zone", "Intermediate Zone"],
+    "climate": "Requires well-drained fertile soils, adequate sunlight, and moderate watering, especially during flowering.",
+    "fertilizerPerHectare": {
+      "basal": ["Urea 100 kg", "TSP 100 kg", "MOP 50 kg"],
+      "topDressing": ["Urea 100 kg (after 4 weeks)"],
+      "tips": ["Apply compost to improve soil fertility and structure. Avoid waterlogging."]
+    },
+    "cultivationProcess": "Fields are ploughed deeply, and seeds sown in rows spaced 60–75 cm apart, with 25–30 cm between plants. Irrigation is applied during germination and flowering. Early weeding ensures minimal competition. Pest monitoring, particularly for fall armyworm, is important. Maize reaches maturity in 90–110 days when cobs are fully developed and grains hard. After harvest, cobs should be dried properly before storage."
+  },
+
+  "ONION": {
+    "name": "Onion (Big Onion)",
+    "imageAsset": "assets/images/crops/onion.png",
+    "seasonalFactors": [
+      "Maha: Nursery Sept → Harvest Jan",
+      "Yala: Nursery May → Harvest Aug"
+    ],
+    "zones": ["Dry Zone", "Intermediate Zone"],
+    "climate": "Prefers warm, well-drained sandy loam soils; avoid excess moisture to prevent diseases.",
+    "fertilizerPerHectare": {
+      "basal": ["Urea 65 kg", "TSP 100 kg", "MOP 50 kg"],
+      "topDressing": ["Urea 65 kg (after 1 month)"],
+      "tips": ["Apply compost to improve bulb quality. Ensure adequate spacing and water management."]
+    },
+    "cultivationProcess": "Nursery beds are prepared to raise seedlings for 4–6 weeks before transplanting. Fields are well-prepared, and seedlings are planted with 10–15 cm spacing. Regular watering is required, taking care not to overwater. Weeding should be done carefully to protect roots. Harvest occurs when tops bend and dry, usually after 3–4 months. Bulbs are then cured in shade before storage to enhance shelf life."
+  },
+
+  "BEETROOT": {
+    "name": "Beetroot",
+    "imageAsset": "assets/images/crops/beetroot.png",
+    "seasonalFactors": ["Maha & Yala – Both seasons suitable."],
+    "zones": ["Upcountry", "Midcountry"],
+    "climate": "Prefers cool climates with well-drained, fertile soils; avoid waterlogging.",
+    "fertilizerPerHectare": {
+      "basal": ["Urea 60 kg", "TSP 80 kg", "MOP 60 kg"],
+      "topDressing": ["Urea 60 kg (after 3 weeks)"],
+      "tips": ["Use compost for better root growth and soil fertility. Ensure consistent moisture without waterlogging."]
+    },
+    "cultivationProcess": "The soil is prepared to be loose and fertile. Seeds are sown directly in rows with 30 cm spacing. Regular watering is applied, while weeds are removed early to reduce competition. Beetroot matures in 60–75 days, and roots are harvested when they achieve deep red color for optimal quality."
+  },
+
+  "RADISH": {
+    "name": "Radish",
+    "imageAsset": "assets/images/crops/radish.png",
+    "seasonalFactors": ["Maha & Yala – Both seasons suitable."],
+    "zones": ["Upcountry", "Midcountry"],
+    "climate": "Prefers cool, well-drained sandy soils; avoid overwatering to prevent root splitting.",
+    "fertilizerPerHectare": {
+      "basal": ["Urea 50 kg", "TSP 75 kg", "MOP 50 kg"],
+      "topDressing": ["Urea 50 kg (after 2–3 weeks)"],
+      "tips": ["Compost improves soil fertility and rapid root development. Maintain regular, light watering."]
+    },
+    "cultivationProcess": "Loose sandy soil is prepared and seeds sown directly in rows with 10 cm spacing. Watering is applied lightly every day, and weeds are removed carefully to prevent damage to roots. Radish matures quickly in 30–45 days, and timely harvesting is critical before roots become woody or fibrous."
+  },
+
+  "CHICKPEA": {
+    "name": "Chickpea",
+    "imageAsset": "assets/images/crops/chickpea.png",
+    "seasonalFactors": ["Maha (Oct–Feb) – Main rain-fed season."],
+    "zones": ["Dry Zone"],
+    "climate": "Prefers well-drained sandy loam soils; requires minimal irrigation and should avoid overwatering during flowering.",
+    "fertilizerPerHectare": {
+      "basal": ["TSP 100 kg", "MOP 50 kg"],
+      "optional": ["Urea 25 kg (if poor growth)"],
+      "tips": ["Compost enhances soil fertility and pod formation. Minimal irrigation is sufficient."]
+    },
+    "cultivationProcess": "Seeds are sown directly in rows spaced 30–45 cm apart. Early weeding prevents competition for nutrients. Chickpea matures in 90–100 days, and harvesting occurs when plants turn yellow and pods dry. After harvest, plants should be dried thoroughly and seeds separated for storage."
+  }
+}

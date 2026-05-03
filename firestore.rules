@@ -1,0 +1,201 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    function isLabourUser() { return resource.data.userType == "labour"; }
+
+    function isLabourOfBooking() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == "labour"
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.labourId == resource.data.labourId
+        && request.resource.data.status in ["accepted","rejected","completed"];
+    }
+
+    // ✅ Equipment user check
+    function isEquipmentUser() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == "equipment";
+    }
+
+    function myEquipmentId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.equipmentId;
+    }
+
+    // ----------------------------
+    // ✅ USERS
+    // ----------------------------
+    match /users/{uid} {
+      // self read OR labour user docs readable (for labourUid query pattern)
+      allow read: if signedIn() && (request.auth.uid == uid || isLabourUser());
+      allow write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // allow everything under user (subcollections)
+    match /users/{uid}/{document=**} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // ----------------------------
+    // ✅ PUBLIC READ COLLECTIONS
+    // ----------------------------
+    match /sellers/{sellerId} { allow read: if true; allow write: if false; }
+
+    // ----------------------------
+    // ✅ LABOURS
+    // Public read (lists/recommendations). Signed-in users can create; owner (createdByUid) can update/delete.
+    // ----------------------------
+    match /labours/{labourId} {
+      allow read: if true;
+      allow create: if signedIn();
+      allow update, delete: if signedIn() && resource.data.createdByUid == request.auth.uid;
+    }
+
+    // ----------------------------
+    // ✅ EQUIPMENTS
+    // Public read. Signed-in can create. Owner can update/delete (by equipmentId link OR createdByUid for new posts).
+    // ----------------------------
+    match /equipments/{equipmentId} {
+      allow read: if true;
+      allow create: if signedIn();
+      allow update: if signedIn() && (
+        (isEquipmentUser() && myEquipmentId() == equipmentId)
+        || resource.data.createdByUid == request.auth.uid
+      );
+      allow delete: if signedIn() && (
+        (isEquipmentUser() && myEquipmentId() == equipmentId)
+        || resource.data.createdByUid == request.auth.uid
+      );
+    }
+
+    // ----------------------------
+    // ✅ LABOUR booking_keys locks (existing)
+    // ----------------------------
+    match /booking_keys/{keyId} {
+      allow create: if signedIn()
+        && request.resource.data.labourId is string
+        && request.resource.data.date is string
+        && request.resource.data.farmerUid is string
+        && request.resource.data.farmerUid == request.auth.uid
+        && keyId == (request.resource.data.labourId + "_" + request.resource.data.date);
+
+      allow delete: if signedIn()
+        && (
+          resource.data.farmerUid == request.auth.uid
+          || (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == "labour"
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.labourId == resource.data.labourId
+          )
+        );
+
+      allow read: if signedIn();
+      allow update: if false;
+    }
+
+    // ----------------------------
+    // ✅ EQUIPMENT BOOKINGS
+    // ----------------------------
+    match /equipment_bookings/{bookingId} {
+
+      function isFarmerOfBooking() {
+        return signedIn() && resource.data.farmerUid == request.auth.uid;
+      }
+
+      function isOwnerOfBooking() {
+        return isEquipmentUser() && resource.data.equipmentId == myEquipmentId();
+      }
+
+      // farmer creates booking (MUST include equipmentOwnerUid)
+      allow create: if signedIn()
+        && request.resource.data.farmerUid == request.auth.uid
+        && request.resource.data.equipmentId is string
+        && request.resource.data.equipmentOwnerUid is string
+        && request.resource.data.status == "pending"
+        && request.resource.data.startDate is string
+        && request.resource.data.endDate is string
+        && request.resource.data.type is string;
+
+      // read: farmer reads his, owner reads bookings for his equipmentId
+      allow read: if isFarmerOfBooking() || isOwnerOfBooking();
+
+      // update:
+      // owner accept/reject/complete
+      // farmer cancel while pending
+      allow update: if
+        (
+          isOwnerOfBooking()
+          && request.resource.data.status in ["accepted", "rejected", "completed"]
+        )
+        ||
+        (
+          signedIn()
+          && resource.data.farmerUid == request.auth.uid
+          && resource.data.status == "pending"
+          && request.resource.data.status == "cancelled"
+        );
+
+      allow delete: if false;
+    }
+    // ----------------------------
+    // ✅ REVIEWS
+    // ----------------------------
+    match /reviews/{reviewId} {
+      allow create: if signedIn()
+        && request.resource.data.reviewByUid == request.auth.uid
+        && request.resource.data.bookingId is string
+        && request.resource.data.itemType in ["labour", "equipment"]
+        && request.resource.data.itemId is string
+        && request.resource.data.rating is number
+        && request.resource.data.sentiment in ["good", "bad"]
+        && request.resource.data.comment is string;
+
+      // signed-in users can read reviews (optional)
+      allow read: if signedIn();
+
+      allow update, delete: if false;
+    }
+
+    match /croprecomdation/{docId} {
+      allow read: if true;          // anyone can read
+      allow write: if false;        // nobody can write from app
+    }
+    // ----------------------------
+    // ✅ LABOUR BOOKINGS (existing)
+    // ----------------------------
+    match /bookings/{bookingId} {
+
+      allow create: if signedIn()
+        && request.resource.data.farmerUid == request.auth.uid
+        && request.resource.data.status == "pending"
+        && request.resource.data.labourId is string
+        && request.resource.data.startDate is string
+        && request.resource.data.endDate is string;
+
+      allow read: if signedIn()
+        && (
+          resource.data.farmerUid == request.auth.uid
+          || (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.userType == "labour"
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.labourId == resource.data.labourId
+          )
+        );
+
+      allow update: if signedIn()
+        && (
+          (
+            resource.data.farmerUid == request.auth.uid
+            && resource.data.status == "pending"
+            && request.resource.data.status == "cancelled"
+          )
+          || isLabourOfBooking()
+        );
+
+      allow delete: if false;
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-02-27T22:54:55.530205Z",
+  "yield_kg_per_acre": 105.37,
+  "inputs_used": [
+    "temperature",
+    "ph",
+    "nitrogen",
+    "phosphorous",
+    "potassium",
+    "soil",
+    "crop",
+    "growth_stage"
+  ],
+  "inputs_payload": {
+    "temperature": 28,
+    "ph": 5,
+    "nitrogen": 56,
+    "phosphorous": 43,
+    "potassium": 65,
+    "crop": "Rice",
+    "growth_stage": "flowering"
+  }
+}

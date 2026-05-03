@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "899385662271",
+    "project_id": "yield-sync-b1f09",
+    "storage_bucket": "yield-sync-b1f09.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:899385662271:android:003a319c3c69b2afc0518a",
+        "android_client_info": {
+          "package_name": "com.example.yield_sync"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAr6Ywt6DIBONS0y7qyvoPd3fIOu17ESPg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
