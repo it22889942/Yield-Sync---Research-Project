@@ -242,6 +242,20 @@ class EquipmentListItem {
   factory EquipmentListItem.fromJson(Map<String, dynamic> j) {
     double toD(v) => (v is num) ? v.toDouble() : double.tryParse('$v') ?? 0.0;
     int toI(v) => (v is num) ? v.toInt() : int.tryParse('$v') ?? 0;
+    final hourlyRateRaw = toD(
+      j['hourly_rate'] ?? j['Hourly_Rate_LKR'] ?? j['Hourly_Rate'],
+    );
+    final dailyRateRaw = toD(
+      j['daily_rate'] ??
+          j['Daily_Rate_LKR'] ??
+          j['Daily_Rate'] ??
+          j['Rate_Per_Day'] ??
+          j['Price_Per_Day'],
+    );
+    // Smart recommendations can return only hourly rate.
+    final resolvedDailyRate = dailyRateRaw > 0 ? dailyRateRaw : hourlyRateRaw;
+    final resolvedHourlyRate =
+        hourlyRateRaw > 0 ? hourlyRateRaw : (dailyRateRaw > 0 ? dailyRateRaw / 8 : 0.0);
 
     return EquipmentListItem(
       // Support both /api/equipment/search (lowercase keys)
@@ -258,8 +272,8 @@ class EquipmentListItem {
       nearestMajorDistrict:
           (j['nearest_major_district'] ?? j['Nearest_Major_District'] ?? '')
               .toString(),
-      hourlyRate: toD(j['hourly_rate'] ?? j['Hourly_Rate_LKR']),
-      dailyRate: toD(j['daily_rate'] ?? j['Daily_Rate_LKR']),
+      hourlyRate: resolvedHourlyRate,
+      dailyRate: resolvedDailyRate,
       rating: toD(j['rating'] ?? j['Rating']),
       pastBookings: toI(j['past_bookings'] ?? j['Past_Bookings']),
       ownerName:
