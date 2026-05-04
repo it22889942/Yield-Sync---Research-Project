@@ -34,8 +34,17 @@ class _MatchCropScreenState extends State<MatchCropScreen> {
 
   bool _loadingLoc = false;
   bool _loadingPredict = false;
+  bool _submitted = false;
 
   CropPredictResult? _result;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final ctrl in [_nCtrl, _pCtrl, _kCtrl, _phCtrl, _tempCtrl, _humCtrl]) {
+      ctrl.addListener(_onInputChanged);
+    }
+  }
 
   @override
   void dispose() {
@@ -46,6 +55,59 @@ class _MatchCropScreenState extends State<MatchCropScreen> {
     _tempCtrl.dispose();
     _humCtrl.dispose();
     super.dispose();
+  }
+
+  void _onInputChanged() {
+    if (mounted) setState(() {});
+  }
+
+  double? _readNum(TextEditingController ctrl) {
+    return double.tryParse(ctrl.text.trim());
+  }
+
+  bool _inRange(double? value, double min, double max) {
+    return value != null && value >= min && value <= max;
+  }
+
+  String? _fieldError({
+    required TextEditingController ctrl,
+    required String name,
+    required double min,
+    required double max,
+  }) {
+    final text = ctrl.text.trim();
+    if (text.isEmpty) {
+      return _submitted ? "$name is required." : null;
+    }
+
+    final value = double.tryParse(text);
+    if (value == null) return "Enter a valid number.";
+
+    if (value < min || value > max) {
+      return "$name must be between $min and $max.";
+    }
+
+    return null;
+  }
+
+  bool get _hasFieldErrors {
+    return [
+      _fieldError(ctrl: _nCtrl, name: "N", min: 0, max: 200),
+      _fieldError(ctrl: _pCtrl, name: "P", min: 0, max: 200),
+      _fieldError(ctrl: _kCtrl, name: "K", min: 0, max: 200),
+      _fieldError(ctrl: _phCtrl, name: "pH", min: 0, max: 14),
+      _fieldError(ctrl: _tempCtrl, name: "Temperature", min: 0, max: 45),
+      _fieldError(ctrl: _humCtrl, name: "Humidity", min: 0, max: 100),
+    ].any((error) => error != null);
+  }
+
+  bool get _hasValidInputRanges {
+    return _inRange(_readNum(_nCtrl), 0, 200) &&
+        _inRange(_readNum(_pCtrl), 0, 200) &&
+        _inRange(_readNum(_kCtrl), 0, 200) &&
+        _inRange(_readNum(_phCtrl), 0, 14) &&
+        _inRange(_readNum(_tempCtrl), 0, 45) &&
+        _inRange(_readNum(_humCtrl), 0, 100);
   }
 
   // ✅ ONLY location (lat/lon + place)
@@ -98,12 +160,7 @@ class _MatchCropScreenState extends State<MatchCropScreen> {
   }
 
   Future<void> _analyze() async {
-    final n = double.tryParse(_nCtrl.text.trim());
-    final p = double.tryParse(_pCtrl.text.trim());
-    final k = double.tryParse(_kCtrl.text.trim());
-    final ph = double.tryParse(_phCtrl.text.trim());
-    final temp = double.tryParse(_tempCtrl.text.trim());
-    final humidity = double.tryParse(_humCtrl.text.trim());
+    setState(() => _submitted = true);
 
     if (_lat == null || _lon == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -112,19 +169,21 @@ class _MatchCropScreenState extends State<MatchCropScreen> {
       return;
     }
 
-    if (n == null ||
-        p == null ||
-        k == null ||
-        ph == null ||
-        temp == null ||
-        humidity == null) {
+    if (_hasFieldErrors || !_hasValidInputRanges) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Enter valid N, P, K, pH, Temperature, Humidity."),
+          content: Text("Please fix the highlighted fields."),
         ),
       );
       return;
     }
+
+    final n = double.parse(_nCtrl.text.trim());
+    final p = double.parse(_pCtrl.text.trim());
+    final k = double.parse(_kCtrl.text.trim());
+    final ph = double.parse(_phCtrl.text.trim());
+    final temp = double.parse(_tempCtrl.text.trim());
+    final humidity = double.parse(_humCtrl.text.trim());
 
     setState(() {
       _loadingPredict = true;
@@ -208,12 +267,23 @@ class _MatchCropScreenState extends State<MatchCropScreen> {
     _humCtrl.clear();
     setState(() {
       _result = null;
+      _submitted = false;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final hasLocation = _lat != null && _lon != null;
+    final canAnalyze = hasLocation && !_loadingPredict;
+
+    final nError = _fieldError(ctrl: _nCtrl, name: "N", min: 0, max: 200);
+    final pError = _fieldError(ctrl: _pCtrl, name: "P", min: 0, max: 200);
+    final kError = _fieldError(ctrl: _kCtrl, name: "K", min: 0, max: 200);
+    final phError = _fieldError(ctrl: _phCtrl, name: "pH", min: 0, max: 14);
+    final tempError =
+        _fieldError(ctrl: _tempCtrl, name: "Temperature", min: 0, max: 45);
+    final humError =
+        _fieldError(ctrl: _humCtrl, name: "Humidity", min: 0, max: 100);
 
     return AppShell(
       currentIndex: 0,
@@ -459,31 +529,32 @@ class _MatchCropScreenState extends State<MatchCropScreen> {
                         const SizedBox(height: 14),
                         Row(
                           children: [
-                            Expanded(child: _numField("N", _nCtrl)),
+                            Expanded(child: _numField("N", _nCtrl, nError)),
                             const SizedBox(width: 10),
-                            Expanded(child: _numField("P", _pCtrl)),
+                            Expanded(child: _numField("P", _pCtrl, pError)),
                             const SizedBox(width: 10),
-                            Expanded(child: _numField("K", _kCtrl)),
+                            Expanded(child: _numField("K", _kCtrl, kError)),
                           ],
                         ),
                         const SizedBox(height: 12),
                         Row(
                           children: [
-                            Expanded(child: _numField("pH", _phCtrl)),
+                            Expanded(child: _numField("pH", _phCtrl, phError)),
                             const SizedBox(width: 10),
-                            Expanded(child: _numField("Temp (°C)", _tempCtrl)),
+                            Expanded(
+                              child: _numField(
+                                  "Temp (°C)", _tempCtrl, tempError),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 12),
-                        _numField("Humidity (%)", _humCtrl),
+                        _numField("Humidity (%)", _humCtrl, humError),
                         const SizedBox(height: 16),
                         SizedBox(
                           width: double.infinity,
                           height: 52,
                           child: ElevatedButton.icon(
-                            onPressed: (!hasLocation || _loadingPredict)
-                                ? null
-                                : _analyze,
+                            onPressed: canAnalyze ? _analyze : null,
                             icon: const Icon(Icons.auto_graph_rounded),
                             label: Text(
                               _loadingPredict
@@ -642,12 +713,14 @@ class _MatchCropScreenState extends State<MatchCropScreen> {
     );
   }
 
-  Widget _numField(String label, TextEditingController ctrl) {
+  Widget _numField(
+      String label, TextEditingController ctrl, String? errorText) {
     return TextField(
       controller: ctrl,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       decoration: InputDecoration(
         labelText: label,
+        errorText: errorText,
         filled: true,
         fillColor: AppColors.surface,
         border: OutlineInputBorder(
@@ -661,6 +734,19 @@ class _MatchCropScreenState extends State<MatchCropScreen> {
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Colors.redAccent),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 1.6),
+        ),
+        errorStyle: const TextStyle(
+          color: Colors.redAccent,
+          fontWeight: FontWeight.w700,
+          fontSize: 11.5,
         ),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 12, vertical: 12),

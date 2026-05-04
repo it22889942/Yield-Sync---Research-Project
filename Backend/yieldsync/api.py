@@ -25,7 +25,7 @@ import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from .predictor import YieldSyncPredictor
+from .predictor import YieldSyncPredictor, ProfitConfig
 from .config import TARGET_CROPS, CROP_MARKETS, FORECAST_HORIZONS, PERISHABILITY
 
 
@@ -142,7 +142,12 @@ class YieldSyncAPI:
         return result
     
     def get_recommendation(self, crop: str, market: str = None, days_ahead: int = 7,
-                          quantity_kg: float = 1000) -> Dict:
+                          quantity_kg: float = 1000,
+                          days_since_harvest: int = 0,
+                          transport_cost_per_kg: Optional[float] = None,
+                          storage_cost_per_kg_day: Optional[float] = None,
+                          fixed_cost_total: Optional[float] = None,
+                          spoilage_rate: Optional[float] = None) -> Dict:
         """
         Get buy/sell recommendation with profit analysis.
         
@@ -151,6 +156,11 @@ class YieldSyncAPI:
             market: Market name (optional)
             days_ahead: Holding period in days
             quantity_kg: Amount of crop in kg
+            days_since_harvest: Days passed since harvest
+            transport_cost_per_kg: Optional transport cost per kg (LKR)
+            storage_cost_per_kg_day: Optional storage cost per kg per day (LKR)
+            fixed_cost_total: Optional fixed cost for this batch (LKR)
+            spoilage_rate: Optional spoilage rate override (% per day)
         
         Returns:
             Dict containing:
@@ -171,12 +181,21 @@ class YieldSyncAPI:
             return prediction
         
         # Get recommendation
+        profit_config = ProfitConfig(
+            transport_cost_per_kg=(5.0 if transport_cost_per_kg is None else float(transport_cost_per_kg)),
+            storage_cost_per_kg_day=(1.0 if storage_cost_per_kg_day is None else float(storage_cost_per_kg_day)),
+            fixed_cost_total=(0.0 if fixed_cost_total is None else float(fixed_cost_total)),
+            spoilage_rate=(None if spoilage_rate is None else float(spoilage_rate)),
+        )
+
         result = self._predictor.get_recommendation(
             crop=crop,
             current_price=prediction['current_price'],
             predicted_price=prediction['predicted_price'],
             days_ahead=days_ahead,
-            quantity_kg=quantity_kg
+            quantity_kg=quantity_kg,
+            days_since_harvest=days_since_harvest,
+            profit_config=profit_config,
         )
         
         # Add prediction info

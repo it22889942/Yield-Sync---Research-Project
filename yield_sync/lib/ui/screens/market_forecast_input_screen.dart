@@ -25,18 +25,37 @@ class _MarketForecastInputScreenState extends State<MarketForecastInputScreen> {
   int _daysSinceHarvest = 5;
   int _daysAhead = 7;
 
+  // Optional cost fields
+  bool _showCostFields = false;
+  final _transportCtrl = TextEditingController();
+  final _storageCtrl = TextEditingController();
+  final _fixedCostCtrl = TextEditingController();
+
   bool _loading = true;
   bool _submitting = false;
   String _err = "";
 
   // ✅ Web-like date UI (backend logic unchanged)
   DateTime _predictDate = DateTime.now();
-  String _dataAvailableUpTo = "2026-02-16";
+  String _dataAvailableUpTo = "-";
 
   @override
   void initState() {
     super.initState();
     _loadCrops();
+  }
+
+  @override
+  void dispose() {
+    _transportCtrl.dispose();
+    _storageCtrl.dispose();
+    _fixedCostCtrl.dispose();
+    super.dispose();
+  }
+
+  double? _parseOptional(TextEditingController ctrl) {
+    final v = double.tryParse(ctrl.text.trim());
+    return (v != null && v > 0) ? v : null;
   }
 
   Future<void> _loadCrops() async {
@@ -46,6 +65,7 @@ class _MarketForecastInputScreenState extends State<MarketForecastInputScreen> {
     });
 
     try {
+      await _loadDataAvailableUpTo();
       final data = await MarketApi.getCrops();
       final crops =
           (data["crops"] as List? ?? []).map((e) => e.toString()).toList();
@@ -67,6 +87,28 @@ class _MarketForecastInputScreenState extends State<MarketForecastInputScreen> {
         _err = "$e";
       });
     }
+  }
+
+  Future<void> _loadDataAvailableUpTo() async {
+    try {
+      final res = await MarketApi.trends(maxPoints: 1, recent: 1);
+      final stats = (res["stats"] as Map?)?.cast<String, dynamic>() ?? {};
+      final lastDateRaw = (stats["last_date"] ?? "").toString();
+      final lastDate = DateTime.tryParse(lastDateRaw);
+
+      if (lastDate != null && mounted) {
+        setState(() => _dataAvailableUpTo = _formatDate(lastDate));
+      }
+    } catch (_) {
+      // Keep fallback "-" if loading latest date fails.
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    final y = date.year.toString().padLeft(4, '0');
+    final m = date.month.toString().padLeft(2, '0');
+    final d = date.day.toString().padLeft(2, '0');
+    return "$y-$m-$d";
   }
 
   Future<void> _loadMarkets(String crop) async {
@@ -107,6 +149,9 @@ class _MarketForecastInputScreenState extends State<MarketForecastInputScreen> {
           quantityKg: _quantityKg,
           daysSinceHarvest: _daysSinceHarvest,
           daysAhead: _daysAhead,
+          transportCostPerKg: _parseOptional(_transportCtrl),
+          storageCostPerKgDay: _parseOptional(_storageCtrl),
+          fixedCostTotal: _parseOptional(_fixedCostCtrl),
         ),
       ),
     );
@@ -195,7 +240,7 @@ class _MarketForecastInputScreenState extends State<MarketForecastInputScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      "Choose crop & market, set horizon and\nget a smart recommendation.",
+                      "Choose crop & market and\nget a smart recommendation.",
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.72),
                         fontWeight: FontWeight.w600,
@@ -233,7 +278,7 @@ class _MarketForecastInputScreenState extends State<MarketForecastInputScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              "Tip: Use 30 days horizon for better trend smoothing.",
+                              "Tip: Use quantity and harvest age for a better recommendation.",
                               style: TextStyle(
                                 color: Colors.white.withOpacity(0.86),
                                 fontWeight: FontWeight.w700,
@@ -330,10 +375,6 @@ class _MarketForecastInputScreenState extends State<MarketForecastInputScreen> {
                                 onChanged: (v) => setState(() => _market = v),
                               ),
                               const SizedBox(height: 16),
-                              _label("Forecast Horizon"),
-                              const SizedBox(height: 8),
-                              _horizonChips(),
-                              const SizedBox(height: 18),
                               _label("Quantity (kg)"),
                               const SizedBox(height: 8),
                               _stepperCard(
@@ -356,6 +397,80 @@ class _MarketForecastInputScreenState extends State<MarketForecastInputScreen> {
                                 onPlus: () => setState(() => _daysSinceHarvest =
                                     (_daysSinceHarvest + 1).clamp(0, 365)),
                               ),
+                              const SizedBox(height: 14),
+
+                              // ✅ Advanced Cost Settings (collapsible)
+                              InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: () => setState(
+                                    () => _showCostFields = !_showCostFields),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.surface,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border:
+                                        Border.all(color: AppColors.border),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.tune_rounded,
+                                          color: AppColors.darkGreen,
+                                          size: 20),
+                                      const SizedBox(width: 10),
+                                      const Expanded(
+                                        child: Text(
+                                          "Advanced Cost Settings (Optional)",
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            color: AppColors.textDark,
+                                          ),
+                                        ),
+                                      ),
+                                      Icon(
+                                        _showCostFields
+                                            ? Icons.keyboard_arrow_up_rounded
+                                            : Icons.keyboard_arrow_down_rounded,
+                                        color: AppColors.darkGreen,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+
+                              if (_showCostFields) ...[
+                                const SizedBox(height: 12),
+                                _costField(
+                                  controller: _transportCtrl,
+                                  label: "Transport Cost / kg (LKR)",
+                                  hint: "e.g. 6.0  —  leave blank for default",
+                                ),
+                                const SizedBox(height: 10),
+                                _costField(
+                                  controller: _storageCtrl,
+                                  label: "Storage Cost / kg / day (LKR)",
+                                  hint: "e.g. 1.2  —  leave blank for default",
+                                ),
+                                const SizedBox(height: 10),
+                                _costField(
+                                  controller: _fixedCostCtrl,
+                                  label: "Fixed Cost Total (LKR)",
+                                  hint: "e.g. 300  —  leave blank to skip",
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  "Leave blank to use backend defaults. "
+                                  "Filled values are used for profit analysis.",
+                                  style: TextStyle(
+                                    color:
+                                        AppColors.textDark.withOpacity(0.50),
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 11.8,
+                                  ),
+                                ),
+                              ],
+
                               const SizedBox(height: 18),
                               SizedBox(
                                 width: double.infinity,
@@ -518,59 +633,6 @@ class _MarketForecastInputScreenState extends State<MarketForecastInputScreen> {
     );
   }
 
-  // ✅ better horizon selector (chips, not dropdown)
-  Widget _horizonChips() {
-    final options = const [7, 14, 30];
-
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        children: options.map((d) {
-          final sel = d == _daysAhead;
-          return Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: () => setState(() => _daysAhead = d),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    color: sel
-                        ? AppColors.primary.withOpacity(0.30)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: sel
-                          ? AppColors.primary.withOpacity(0.60)
-                          : AppColors.border,
-                    ),
-                  ),
-                  child: Center(
-                    child: Text(
-                      "${d}D",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: sel
-                            ? AppColors.darkGreen
-                            : AppColors.textDark.withOpacity(0.70),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
   Widget _dropdown({
     required String? value,
     required List<String> items,
@@ -643,6 +705,49 @@ class _MarketForecastInputScreenState extends State<MarketForecastInputScreen> {
           _roundIconBtn(icon: Icons.add_rounded, onTap: onPlus),
         ],
       ),
+    );
+  }
+
+  Widget _costField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label(label),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: controller,
+          keyboardType:
+              const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(
+              color: AppColors.textDark.withOpacity(0.40),
+              fontSize: 12.5,
+            ),
+            filled: true,
+            fillColor: AppColors.surface,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppColors.border),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppColors.border),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide:
+                  const BorderSide(color: AppColors.primary, width: 1.6),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

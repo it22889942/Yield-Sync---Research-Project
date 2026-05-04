@@ -5,6 +5,8 @@ import '../widgets/app_shell.dart';
 
 import '../../services/fertiliser_service.dart';
 import '../../services/fertiliser_history_service.dart';
+import '../../services/soil_firestore_service.dart';
+import '../../models/soil_reading.dart';
 import 'fertilizer_result_screen.dart';
 
 class FertilizerFormScreen extends StatefulWidget {
@@ -16,6 +18,7 @@ class FertilizerFormScreen extends StatefulWidget {
 
 class _FertilizerFormScreenState extends State<FertilizerFormScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _soilService = SoilFirestoreService();
 
   final _tempCtrl = TextEditingController(text: "28");
   final _phCtrl = TextEditingController();
@@ -31,6 +34,8 @@ class _FertilizerFormScreenState extends State<FertilizerFormScreen> {
   String _stage = "Flowering";
 
   bool _loading = false;
+  bool _loadingRealtime = false;
+  String? _realtimeStatus;
 
   // interactive temp slider
   double _tempSlider = 28;
@@ -60,6 +65,58 @@ class _FertilizerFormScreenState extends State<FertilizerFormScreen> {
   // backend stage expects lowercase like "flowering"
   String _toBackendStage(String ui) => ui.toLowerCase();
 
+  void _applySoilReading(SoilReading reading) {
+    _tempCtrl.text = reading.temperature.toStringAsFixed(1);
+    _phCtrl.text = reading.ph.toStringAsFixed(1);
+    _nCtrl.text = reading.n.toStringAsFixed(0);
+    _pCtrl.text = reading.p.toStringAsFixed(0);
+    _kCtrl.text = reading.k.toStringAsFixed(0);
+    _tempSlider = reading.temperature.clamp(0, 45).toDouble();
+  }
+
+  Future<void> _loadRealtimeSoilData() async {
+    setState(() {
+      _loadingRealtime = true;
+      _realtimeStatus = null;
+    });
+
+    try {
+      final reading = await _soilService.fetchLatestSoilReading();
+      if (!mounted) return;
+
+      if (reading == null) {
+        setState(() {
+          _realtimeStatus = "No realtime soil data found in Firestore.";
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("No realtime soil data found.")),
+        );
+        return;
+      }
+
+      setState(() {
+        _applySoilReading(reading);
+        _realtimeStatus = "Realtime soil data loaded into the form.";
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Realtime soil data loaded.")),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _realtimeStatus = "Failed to load realtime soil data.";
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Realtime data error: $e")),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _loadingRealtime = false);
+      }
+    }
+  }
+
   Future<void> _analyze() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -75,6 +132,18 @@ class _FertilizerFormScreenState extends State<FertilizerFormScreen> {
     setState(() => _loading = true);
 
     try {
+      try {
+        await _soilService.saveLatestSoilInputs(
+          temperature: temp,
+          ph: ph,
+          n: n,
+          p: p,
+          k: k,
+        );
+      } catch (_) {
+        // Keep prediction flow working even if Firestore sync fails.
+      }
+
       final res = await FertiliserService.predict(
         temperature: temp,
         ph: ph,
@@ -307,6 +376,94 @@ class _FertilizerFormScreenState extends State<FertilizerFormScreen> {
                     onAction: _reset,
                   ),
                   const SizedBox(height: 12),
+                  _card(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withOpacity(0.18),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: const Icon(
+                                Icons.sensors_rounded,
+                                color: AppColors.darkGreen,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            const Expanded(
+                              child: Text(
+                                "Realtime Soil Data",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 15,
+                                  color: AppColors.textDark,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          "Tap once to load temperature, pH, N, P and K from Firebase soil data into this form.",
+                          style: TextStyle(
+                            color: AppColors.textDark.withOpacity(0.70),
+                            fontWeight: FontWeight.w700,
+                            height: 1.3,
+                          ),
+                        ),
+                        if (_realtimeStatus != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            _realtimeStatus!,
+                            style: TextStyle(
+                              color: AppColors.textDark.withOpacity(0.58),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 48,
+                          child: OutlinedButton.icon(
+                            onPressed:
+                                _loadingRealtime ? null : _loadRealtimeSoilData,
+                            icon: _loadingRealtime
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.darkGreen,
+                                    ),
+                                  )
+                                : const Icon(Icons.download_rounded),
+                            label: Text(
+                              _loadingRealtime
+                                  ? "Loading realtime data..."
+                                  : "Get Realtime Data",
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.darkGreen,
+                              side: const BorderSide(color: AppColors.border),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
 
                   _section(
                     icon: Icons.cloud_rounded,
@@ -384,7 +541,8 @@ class _FertilizerFormScreenState extends State<FertilizerFormScreen> {
                                 ctrl: _phCtrl,
                                 suffix: "pH",
                                 keyboard: TextInputType.number,
-                                validator: (v) => _reqNumber(v, "pH"),
+                                validator: (v) =>
+                                    _reqNumberInRange(v, "pH", 0, 10),
                               ),
                               const SizedBox(height: 8),
                               Align(
@@ -421,7 +579,12 @@ class _FertilizerFormScreenState extends State<FertilizerFormScreen> {
                                 ctrl: _nCtrl,
                                 suffix: "N",
                                 keyboard: TextInputType.number,
-                                validator: (v) => _reqNumber(v, "Nitrogen"),
+                                validator: (v) => _reqNumberInRange(
+                                  v,
+                                  "Nitrogen",
+                                  0,
+                                  200,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -431,7 +594,12 @@ class _FertilizerFormScreenState extends State<FertilizerFormScreen> {
                                 ctrl: _pCtrl,
                                 suffix: "P",
                                 keyboard: TextInputType.number,
-                                validator: (v) => _reqNumber(v, "Phosphorous"),
+                                validator: (v) => _reqNumberInRange(
+                                  v,
+                                  "Phosphorous",
+                                  0,
+                                  200,
+                                ),
                               ),
                             ),
                           ],
@@ -442,7 +610,8 @@ class _FertilizerFormScreenState extends State<FertilizerFormScreen> {
                           ctrl: _kCtrl,
                           suffix: "K",
                           keyboard: TextInputType.number,
-                          validator: (v) => _reqNumber(v, "Potassium"),
+                          validator: (v) =>
+                              _reqNumberInRange(v, "Potassium", 0, 200),
                         ),
                       ],
                     ),
@@ -708,6 +877,10 @@ class _FertilizerFormScreenState extends State<FertilizerFormScreen> {
           borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
         ),
+        errorStyle: const TextStyle(
+          color: Colors.red,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -747,6 +920,19 @@ class _FertilizerFormScreenState extends State<FertilizerFormScreen> {
   String? _reqNumber(String? v, String name) {
     if (v == null || v.trim().isEmpty) return "$name is required";
     if (double.tryParse(v.trim()) == null) return "Enter a valid number";
+    return null;
+  }
+
+  String? _reqNumberInRange(
+    String? v,
+    String name,
+    double min,
+    double max,
+  ) {
+    final requiredErr = _reqNumber(v, name);
+    if (requiredErr != null) return requiredErr;
+    final n = double.parse(v!.trim());
+    if (n < min || n > max) return "$name must be between $min and $max";
     return null;
   }
 }

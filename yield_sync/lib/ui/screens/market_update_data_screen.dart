@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../services/auth_service.dart';
 import '../../services/market_api.dart';
 import '../../utils/app_colors.dart';
 import '../widgets/app_shell.dart';
@@ -14,6 +16,7 @@ class _MarketUpdateDataScreenState extends State<MarketUpdateDataScreen> {
   bool _loading = true;
   bool _updating = false;
   bool _retraining = false;
+  bool _isAdmin = false;
   String _statusText = "";
   String? _error;
   String _lastEntryDate = "-";
@@ -22,7 +25,24 @@ class _MarketUpdateDataScreenState extends State<MarketUpdateDataScreen> {
   @override
   void initState() {
     super.initState();
-    _loadStatus();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    final userType = await AuthService().getCurrentUserType();
+    if (!mounted) return;
+
+    if (userType != "admin") {
+      setState(() {
+        _isAdmin = false;
+        _loading = false;
+        _error = "Only admin users can access this page.";
+      });
+      return;
+    }
+
+    setState(() => _isAdmin = true);
+    await _loadStatus();
   }
 
   Future<void> _loadStatus() async {
@@ -93,8 +113,9 @@ class _MarketUpdateDataScreenState extends State<MarketUpdateDataScreen> {
       final duration = result["duration_minutes"]?.toString() ?? "N/A";
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content:
-              Text("Retrain done. Models: $modelsTrained, minutes: $duration"),
+          content: Text(
+            "Retrain done. Models: $modelsTrained, minutes: $duration",
+          ),
         ),
       );
     } catch (e) {
@@ -166,20 +187,22 @@ class _MarketUpdateDataScreenState extends State<MarketUpdateDataScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               children: [
-                _actionButton(
-                  icon: Icons.sync_rounded,
-                  text: "Fetch Latest Week",
-                  busy: _updating,
-                  onTap: _updating || _loading ? null : _fetchLatestWeek,
-                ),
-                const SizedBox(height: 12),
-                _actionButton(
-                  icon: Icons.model_training_rounded,
-                  text: "Retrain Models",
-                  busy: _retraining,
-                  onTap: _retraining || _loading ? null : _retrainModels,
-                ),
-                const SizedBox(height: 12),
+                if (_isAdmin) ...[
+                  _actionButton(
+                    icon: Icons.sync_rounded,
+                    text: "Fetch Latest Week",
+                    busy: _updating,
+                    onTap: _updating || _loading ? null : _fetchLatestWeek,
+                  ),
+                  const SizedBox(height: 12),
+                  _actionButton(
+                    icon: Icons.model_training_rounded,
+                    text: "Retrain Models",
+                    busy: _retraining,
+                    onTap: _retraining || _loading ? null : _retrainModels,
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 if (_loading)
                   const Center(
                     child: Padding(
@@ -187,7 +210,7 @@ class _MarketUpdateDataScreenState extends State<MarketUpdateDataScreen> {
                       child: CircularProgressIndicator(),
                     ),
                   )
-                else ...[
+                else if (_isAdmin) ...[
                   _infoCard(
                     icon: Icons.check_box_rounded,
                     text: "$_statusText Last entry: $_lastEntryDate",

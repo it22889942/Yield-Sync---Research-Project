@@ -57,9 +57,10 @@ except ImportError:
 @dataclass
 class ProfitConfig:
     """Configuration for profit calculation"""
-    transport_cost: float = 5.0   # LKR/kg
-    storage_cost: float = 1.0     # LKR/kg/day
-    spoilage_rate: float = 1.0    # %/day
+    transport_cost_per_kg: float = 5.0   # LKR/kg
+    storage_cost_per_kg_day: float = 1.0 # LKR/kg/day
+    fixed_cost_total: float = 0.0        # LKR per batch
+    spoilage_rate: Optional[float] = None  # %/day (None => auto by crop)
 
 
 # =============================================================================
@@ -419,6 +420,7 @@ class YieldSyncPredictor:
     
     def get_recommendation(self, crop: str, current_price: float, predicted_price: float,
                           days_ahead: int = 7, quantity_kg: float = 1000,
+                          days_since_harvest: int = 0,
                           profit_config: ProfitConfig = None) -> Dict:
         """
         Get trading recommendation based on price prediction and economics.
@@ -429,64 +431,153 @@ class YieldSyncPredictor:
             predicted_price: Predicted price (LKR/kg)
             days_ahead: Holding period
             quantity_kg: Batch size in kg
+            days_since_harvest: Days passed since harvest
             profit_config: Storage/transport costs
         
         Returns:
             Dict with decision, reasoning, and profit analysis
         """
+        if quantity_kg <= 0:
+            return {'error': 'quantity_kg must be greater than 0'}
+
+        days_ahead = max(0, int(days_ahead))
+        days_since_harvest = max(0, int(days_since_harvest))
+
         if profit_config is None:
-            # Set spoilage based on crop perishability
-            shelf_life = PERISHABILITY.get(crop, 30)
-            if shelf_life <= 7:
-                spoilage = 2.0
-            elif shelf_life <= 14:
-                spoilage = 1.0
+            profit_config = ProfitConfig()
+
+        # Practicality guardrails: never recommend holding beyond realistic life.
+        shelf_life_days = max(1, int(PERISHABILITY.get(crop, 30)))
+        remaining_shelf_life_days = max(0, shelf_life_days - days_since_harvest)
+        practical_hold_cap_days = max(1, int(round(0.8 * shelf_life_days)))
+        effective_hold_days = min(days_ahead, remaining_shelf_life_days, practical_hold_cap_days)
+
+        warning_notes = []
+        if remaining_shelf_life_days <= 0:
+            warning_notes.append('Crop is beyond estimated shelf life; avoid holding.')
+        elif effective_hold_days < days_ahead:
+            warning_notes.append(
+                f'Hold period reduced from {days_ahead} to {effective_hold_days} day(s) based on perishability.'
+            )
+
+        # Auto spoilage by crop unless explicitly provided.
+        if profit_config.spoilage_rate is None:
+            if shelf_life_days <= 7:
+                effective_spoilage_rate = 2.0
+            elif shelf_life_days <= 14:
+                effective_spoilage_rate = 1.0
             else:
-                spoilage = 0.3
-            profit_config = ProfitConfig(spoilage_rate=spoilage)
-        
-        # Calculate economics
-        revenue_now = (current_price * quantity_kg) - profit_config.transport_cost
-        
-        # Spoilage reduces sellable quantity
-        spoilage_factor = max(0, 1.0 - (profit_config.spoilage_rate / 100.0 * days_ahead))
-        qty_later = quantity_kg * spoilage_factor
-        storage_total = profit_config.storage_cost * days_ahead * quantity_kg
-        
-        revenue_later = (predicted_price * qty_later) - profit_config.transport_cost - storage_total
-        
-        profit_delta = revenue_later - revenue_now
-        profit_delta_pct = (profit_delta / revenue_now * 100) if revenue_now > 0 else 0
-        
-        # Decision logic
-        if profit_delta_pct >= 10.0:
-            decision = "STRONG HOLD"
-            reasoning = f"Wait for +{profit_delta_pct:.1f}% profit"
-        elif profit_delta_pct >= 2.0:
-            decision = "HOLD"
-            reasoning = f"Moderate profit opportunity: +{profit_delta_pct:.1f}%"
-        elif profit_delta_pct <= -10.0:
-            decision = "STRONG SELL"
-            reasoning = f"Sell now to avoid {abs(profit_delta_pct):.1f}% loss"
-        elif profit_delta_pct <= -2.0:
-            decision = "SELL"
-            reasoning = f"Sell now, holding would lose {abs(profit_delta_pct):.1f}%"
+                effective_spoilage_rate = 0.3
         else:
-            decision = "NEUTRAL"
-            reasoning = f"Price stable ({profit_delta_pct:+.1f}%), sell when convenient"
-        
+            effective_spoilage_rate = max(0.0, float(profit_config.spoilage_rate))
+
+        transport_now = float(profit_config.transport_cost_per_kg) * float(quantity_kg)
+        fixed_cost_total = float(profit_config.fixed_cost_total)
+        revenue_now = (float(current_price) * float(quantity_kg)) - transport_now - fixed_cost_total
+
+        # Spoilage reduces sellable quantity for delayed selling.
+        spoilage_factor = max(0.0, 1.0 - (effective_spoilage_rate / 100.0 * effective_hold_days))
+        qty_later = float(quantity_kg) * spoilage_factor
+
+        storage_total = (
+            float(profit_config.storage_cost_per_kg_day)
+            * float(effective_hold_days)
+            * float(quantity_kg)
+        )
+        transport_later = float(profit_config.transport_cost_per_kg) * qty_later
+        revenue_later = (
+            (float(predicted_price) * qty_later)
+            - transport_later
+            - storage_total
+            - fixed_cost_total
+        )
+
+        profit_delta = revenue_later - revenue_now
+        profit_delta_pct = (profit_delta / revenue_now * 100) if revenue_now > 0 else 0.0
+        price_change_per_kg = float(predicted_price) - float(current_price)
+
+        # Decision logic with practicality override.
+        if remaining_shelf_life_days <= 0:
+            decision = 'STRONG SELL'
+            reasoning = 'Crop is at or beyond shelf life. Sell immediately to avoid spoilage loss.'
+        elif effective_hold_days == 0 and days_ahead > 0:
+            decision = 'SELL'
+            reasoning = 'Insufficient safe shelf life for holding period. Sell now.'
+        elif profit_delta_pct >= 10.0:
+            decision = 'STRONG HOLD'
+            reasoning = f'Wait for +{profit_delta_pct:.1f}% expected net profit.'
+        elif profit_delta_pct >= 2.0:
+            decision = 'HOLD'
+            reasoning = f'Moderate net profit opportunity: +{profit_delta_pct:.1f}%.'
+        elif profit_delta_pct <= -10.0:
+            decision = 'STRONG SELL'
+            reasoning = f'Sell now to avoid about {abs(profit_delta_pct):.1f}% net loss.'
+        elif profit_delta_pct <= -2.0:
+            decision = 'SELL'
+            reasoning = f'Sell now, holding is likely to lose {abs(profit_delta_pct):.1f}%.'
+        else:
+            decision = 'NEUTRAL'
+            reasoning = f'Price impact is small ({profit_delta_pct:+.1f}%). Decide by logistics/cashflow.'
+
+        confidence = min(abs(profit_delta_pct) / 10.0 + 0.5, 0.95)
+        if effective_hold_days < days_ahead:
+            confidence = max(0.35, confidence * 0.9)
+
+        # Best timing calculation using shelf_life / 2 midpoint rule
+        is_expired = remaining_shelf_life_days <= 0
+        x = shelf_life_days // 2  # midpoint of shelf life
+
+        if is_expired:
+            best_timing_days = 0
+            best_timing_label = 'Crop expired'
+        elif profit_delta_pct <= 0:
+            # Profit decreasing — sell immediately
+            best_timing_days = 0
+            best_timing_label = 'Sell Now'
+        else:
+            # Profit increasing — find best sell window using midpoint
+            if x <= days_since_harvest:
+                # Already past the optimal midpoint window
+                best_timing_days = 0
+                best_timing_label = 'Sell Now'
+            else:
+                best_timing_days = x - days_since_harvest
+                best_timing_label = f'In {best_timing_days} days'
+
         return {
             'decision': decision,
             'reasoning': reasoning,
+            'shelf_life_days': shelf_life_days,
+            'days_since_harvest': days_since_harvest,
+            'remaining_shelf_life_days': remaining_shelf_life_days,
+            'requested_hold_days': days_ahead,
+            'effective_hold_days': effective_hold_days,
+            'practical_hold_cap_days': practical_hold_cap_days,
+            'price_change_per_kg': round(price_change_per_kg, 2),
+            'price_change_percent': round((price_change_per_kg / current_price * 100) if current_price > 0 else 0.0, 2),
+            'total_if_hold': round(profit_delta, 2),
+            'total_if_sell_now': round(revenue_now, 2),
+            'is_expired': is_expired,
+            'best_timing_days': best_timing_days,
+            'best_timing_label': best_timing_label,
+            'warnings': warning_notes,
+            'cost_breakdown': {
+                'transport_cost_per_kg': round(float(profit_config.transport_cost_per_kg), 4),
+                'storage_cost_per_kg_day': round(float(profit_config.storage_cost_per_kg_day), 4),
+                'fixed_cost_total': round(fixed_cost_total, 2),
+                'transport_cost_now': round(transport_now, 2),
+                'transport_cost_later': round(transport_later, 2),
+                'storage_cost_total': round(storage_total, 2),
+            },
             'profit_analysis': {
                 'revenue_if_sell_now': round(revenue_now, 2),
-                'revenue_if_hold': round(revenue_later, 2),
-                'profit_difference': round(profit_delta, 2),
-                'profit_change_percent': round(profit_delta_pct, 2),
+                'revenue_if_hold': 0.0 if is_expired else round(revenue_later, 2),
+                'profit_difference': 0.0 if is_expired else round(profit_delta, 2),
+                'profit_change_percent': 0.0 if is_expired else round(profit_delta_pct, 2),
                 'spoilage_loss_percent': round((1 - spoilage_factor) * 100, 2),
                 'storage_cost_total': round(storage_total, 2)
             },
-            'confidence': min(abs(profit_delta_pct) / 10.0 + 0.5, 0.95)
+            'confidence': round(confidence, 3)
         }
     
     def get_available_markets(self, crop: str) -> List[str]:

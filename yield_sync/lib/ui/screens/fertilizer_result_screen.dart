@@ -25,8 +25,8 @@ class _FertilizerResultScreenState extends State<FertilizerResultScreen> {
 
   bool _loadingTotal = false;
 
-  double? _totalYieldKg;
-  double? _yieldKgPerAcreUsed;
+  double? _totalFertilizerPerAcreKg;
+  double? _fertilizerPerAcreUsed;
   String? _source;
 
   // interactive area slider
@@ -64,30 +64,30 @@ class _FertilizerResultScreenState extends State<FertilizerResultScreen> {
       return;
     }
 
-    final ypa = widget.result.yieldKgPerAcre;
+    final ypa = widget.result.fertilizerPerAcre;
     if (ypa == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Yield per acre not available.")),
+        const SnackBar(content: Text("Fertilizer per acre not available.")),
       );
       return;
     }
 
     setState(() {
       _loadingTotal = true;
-      _totalYieldKg = null;
-      _yieldKgPerAcreUsed = null;
+      _totalFertilizerPerAcreKg = null;
+      _fertilizerPerAcreUsed = null;
       _source = null;
     });
 
     try {
       final res = await FertiliserService.totalYield(
         areaAcres: acres,
-        yieldKgPerAcre: ypa,
+        fertilizerPerAcre: ypa,
       );
 
       setState(() {
-        _totalYieldKg = res.totalYieldKg;
-        _yieldKgPerAcreUsed = res.yieldKgPerAcre;
+        _totalFertilizerPerAcreKg = res.totalFertilizerPerAcreKg;
+        _fertilizerPerAcreUsed = res.fertilizerPerAcre;
         _source = res.source;
       });
 
@@ -97,8 +97,8 @@ class _FertilizerResultScreenState extends State<FertilizerResultScreen> {
 
       await FertiliserHistoryService().saveTotalYieldCalc(
         areaAcres: acres,
-        yieldKgPerAcre: res.yieldKgPerAcre,
-        totalYieldKg: res.totalYieldKg,
+        fertilizerPerAcre: res.fertilizerPerAcre,
+        totalFertilizerPerAcreKg: res.totalFertilizerPerAcreKg,
         source: res.source,
         fertiliserType: fertType,
         cropLabel: widget.cropLabel,
@@ -125,7 +125,7 @@ class _FertilizerResultScreenState extends State<FertilizerResultScreen> {
         ? "—"
         : widget.result.fertiliserType;
 
-    final ypa = widget.result.yieldKgPerAcre;
+    final ypa = widget.result.fertilizerPerAcre;
 
     return AppShell(
       currentIndex: 0,
@@ -375,7 +375,7 @@ class _FertilizerResultScreenState extends State<FertilizerResultScreen> {
                 ),
 
                 // ===== Final Result Card =====
-                if (_totalYieldKg != null) ...[
+                if (_totalFertilizerPerAcreKg != null) ...[
                   const SizedBox(height: 12),
                   _card(
                     child: Column(
@@ -400,7 +400,7 @@ class _FertilizerResultScreenState extends State<FertilizerResultScreen> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  "${_totalYieldKg!.toStringAsFixed(2)} Kg Total Yield",
+                                  "${_totalFertilizerPerAcreKg!.toStringAsFixed(2)} Kg Total Fertilizer",
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w900,
                                     fontSize: 17,
@@ -415,13 +415,13 @@ class _FertilizerResultScreenState extends State<FertilizerResultScreen> {
                         _kv("Fertiliser Type", fertType),
                         const SizedBox(height: 10),
                         _kv(
-                          "Yield Used (Kg/Acre)",
-                          (_yieldKgPerAcreUsed ?? 0).toStringAsFixed(2),
+                          "Fertilizer Used (Kg/Acre)",
+                          (_fertilizerPerAcreUsed ?? 0).toStringAsFixed(2),
                         ),
                         const SizedBox(height: 10),
                         _kv(
-                          "Total Yield (Kg)",
-                          _totalYieldKg!.toStringAsFixed(2),
+                          "Total Fertilizer (Kg)",
+                          _totalFertilizerPerAcreKg!.toStringAsFixed(2),
                         ),
                         const SizedBox(height: 10),
                         Row(
@@ -487,7 +487,7 @@ class _FertilizerResultScreenState extends State<FertilizerResultScreen> {
                         )
                       : const Icon(Icons.calculate_rounded),
                   label: Text(
-                    _loadingTotal ? "Calculating..." : "Calculate Total Yield",
+                    _loadingTotal ? "Calculating..." : "Calculate Total Fertilizer",
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                 ),

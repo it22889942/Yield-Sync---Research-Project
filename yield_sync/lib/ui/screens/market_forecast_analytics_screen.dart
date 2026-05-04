@@ -10,6 +10,9 @@ class MarketForecastAnalyticsScreen extends StatefulWidget {
   final int quantityKg;
   final int daysSinceHarvest;
   final int daysAhead;
+  final double? transportCostPerKg;
+  final double? storageCostPerKgDay;
+  final double? fixedCostTotal;
 
   const MarketForecastAnalyticsScreen({
     super.key,
@@ -18,6 +21,9 @@ class MarketForecastAnalyticsScreen extends StatefulWidget {
     required this.quantityKg,
     required this.daysSinceHarvest,
     required this.daysAhead,
+    this.transportCostPerKg,
+    this.storageCostPerKgDay,
+    this.fixedCostTotal,
   });
 
   @override
@@ -36,6 +42,7 @@ class _MarketForecastAnalyticsScreenState
   final List<int> _horizons = const [7, 14, 30];
   List<Map<String, dynamic>> _rows = [];
   Map<String, dynamic>? _selected;
+  Map<String, dynamic>? _tomorrow;
 
   @override
   void initState() {
@@ -44,6 +51,7 @@ class _MarketForecastAnalyticsScreenState
   }
 
   // ---------- format helpers ----------
+  String _fmt1(num v) => v.toDouble().toStringAsFixed(1);
   String _fmt2(num v) => v.toDouble().toStringAsFixed(2);
   String _fmtLkr(num v) => "LKR ${_fmt2(v)}";
   String _fmtPct(num v) => "${_fmt2(v)}%";
@@ -54,6 +62,35 @@ class _MarketForecastAnalyticsScreenState
 
   int _asInt(dynamic v) => (v is int) ? v : int.tryParse("$v") ?? 0;
 
+  int _defaultShelfLifeForCrop(String crop) {
+    switch (crop.trim().toLowerCase()) {
+      case "rice":
+        return 180;
+      case "beetroot":
+        return 7;
+      case "radish":
+        return 5;
+      case "red onion":
+        return 30;
+      default:
+        return 30;
+    }
+  }
+
+  int _resolveShelfLifeDays(Map<String, dynamic> rec) {
+    final direct = _asInt(rec["shelf_life_days"] ?? rec["shelf_life"]);
+    if (direct > 0) return direct;
+
+    final fromPrediction = _asInt(
+      (rec["prediction"] is Map)
+          ? (rec["prediction"] as Map)["shelf_life_days"]
+          : null,
+    );
+    if (fromPrediction > 0) return fromPrediction;
+
+    return _defaultShelfLifeForCrop(widget.crop);
+  }
+
   Future<void> _loadAll() async {
     setState(() {
       _loading = true;
@@ -61,6 +98,7 @@ class _MarketForecastAnalyticsScreenState
       _saved = false;
       _rows = [];
       _selected = null;
+      _tomorrow = null;
     });
 
     try {
@@ -72,6 +110,78 @@ class _MarketForecastAnalyticsScreenState
 
       final List<Map<String, dynamic>> rows = [];
       double currentPrice = 0.0;
+
+      // Fetch tomorrow (1-day) data for the hero card — always fixed, not selectable
+      Map<String, dynamic> tomorrowRow = {};
+      {
+        const th = 1;
+        final tPredict = await MarketApi.predict(
+          crop: widget.crop,
+          market: widget.market,
+          daysAhead: th,
+        );
+        final tRec = await MarketApi.recommendation(
+          crop: widget.crop,
+          market: widget.market,
+          daysAhead: th,
+          quantityKg: widget.quantityKg.toDouble(),
+          daysSinceHarvest: widget.daysSinceHarvest,
+          transportCostPerKg: widget.transportCostPerKg,
+          storageCostPerKgDay: widget.storageCostPerKgDay,
+          fixedCostTotal: widget.fixedCostTotal,
+        );
+        currentPrice = _asDouble(tPredict["current_price"]);
+        final tPredictedPrice = _asDouble(tPredict["predicted_price"]);
+        final tChangeKg = tPredictedPrice - currentPrice;
+        final tChangePct = currentPrice == 0 ? 0.0 : (tChangeKg / currentPrice) * 100.0;
+        final tTotal = tChangeKg * widget.quantityKg;
+        final tPerKg = tRec.containsKey("price_change_per_kg") ? _asDouble(tRec["price_change_per_kg"]) : tChangeKg;
+        final tTotalRec = tRec.containsKey("total_if_hold") ? _asDouble(tRec["total_if_hold"]) : tTotal;
+        final tShelfLife = _resolveShelfLifeDays(tRec);
+        final tRemainingShelfLife = tRec.containsKey("remaining_shelf_life_days")
+            ? _asInt(tRec["remaining_shelf_life_days"])
+            : (tShelfLife - widget.daysSinceHarvest).clamp(0, tShelfLife);
+        final tProfitAnalysisMap = (tRec["profit_analysis"] as Map?)?.cast<String, dynamic>() ?? {};
+        final tChangePctRec = tProfitAnalysisMap.containsKey("profit_change_percent")
+            ? _asDouble(tProfitAnalysisMap["profit_change_percent"])
+            : (tRec.containsKey("price_change_percent") ? _asDouble(tRec["price_change_percent"]) : tChangePct);
+        final tEffectiveHoldDays = tRec.containsKey("effective_hold_days") ? _asInt(tRec["effective_hold_days"]) : 1;
+        final tBackendDecision = (tRec["decision"] ?? "NEUTRAL").toString();
+        final tDecision = _resolveDecision(
+          backendDecision: tBackendDecision,
+          changePct: tChangePctRec,
+          totalIfHold: tTotalRec,
+          remainingShelfLifeDays: tRemainingShelfLife,
+          effectiveHoldDays: tEffectiveHoldDays,
+        );
+        final tBackendReasoning = (tRec["reasoning"] ?? "").toString().trim();
+        final tReasoning = tDecision == tBackendDecision.toUpperCase() ? tBackendReasoning : _reasoningForDecision(tDecision, tChangePctRec);
+        final tExpectedPrice = tRec.containsKey("expected_price") ? _asDouble(tRec["expected_price"]) : tPredictedPrice;
+        final tBestTimingText = (tRec["best_timing_label"] ?? tRec["best_timing"] ?? "").toString();
+        final tBestTimingDays = tRec.containsKey("best_timing_days")
+            ? _asInt(tRec["best_timing_days"])
+            : (tRemainingShelfLife <= 0 ? 0 : (tDecision.toUpperCase().contains("SELL") ? 0 : th));
+        final tIsExpired = tRec["is_expired"] == true || tRemainingShelfLife <= 0;
+        tomorrowRow = {
+          "horizon": th,
+          "current_price": currentPrice,
+          "predicted_price": tPredictedPrice,
+          "change_per_kg": tPerKg,
+          "change_pct": tChangePctRec,
+          "total": tTotalRec,
+          "decision": tDecision,
+          "confidence": _asDouble(tRec["confidence"] ?? 0),
+          "shelf_life_days": tShelfLife,
+          "warnings": (tRec["warnings"] as List? ?? []).map((e) => e.toString()).toList(),
+          "reasoning": tReasoning,
+          "expected_price": tExpectedPrice,
+          "best_timing_text": tBestTimingText,
+          "best_timing_days": tBestTimingDays,
+          "is_expired": tIsExpired,
+          "cost_breakdown": (tRec["cost_breakdown"] as Map?)?.cast<String, dynamic>() ?? {},
+          "profit_analysis": (tRec["profit_analysis"] as Map?)?.cast<String, dynamic>() ?? {},
+        };
+      }
 
       for (final h in _horizons) {
         final predict = await MarketApi.predict(
@@ -85,6 +195,10 @@ class _MarketForecastAnalyticsScreenState
           market: widget.market,
           daysAhead: h,
           quantityKg: widget.quantityKg.toDouble(),
+          daysSinceHarvest: widget.daysSinceHarvest,
+          transportCostPerKg: widget.transportCostPerKg,
+          storageCostPerKgDay: widget.storageCostPerKgDay,
+          fixedCostTotal: widget.fixedCostTotal,
         );
 
         currentPrice = currentPrice == 0.0
@@ -104,20 +218,72 @@ class _MarketForecastAnalyticsScreenState
         final totalFromRec = rec.containsKey("total_if_hold")
             ? _asDouble(rec["total_if_hold"])
             : total;
+        final resolvedShelfLife = _resolveShelfLifeDays(rec);
+
+        final costBreakdown =
+            (rec["cost_breakdown"] as Map?)?.cast<String, dynamic>() ?? {};
+        final profitAnalysis =
+            (rec["profit_analysis"] as Map?)?.cast<String, dynamic>() ?? {};
+
+        final resolvedChangePct = profitAnalysis.containsKey("profit_change_percent")
+            ? _asDouble(profitAnalysis["profit_change_percent"])
+            : (rec.containsKey("price_change_percent") ? _asDouble(rec["price_change_percent"]) : changePct);
+
+        final remainingShelfLife = rec.containsKey("remaining_shelf_life_days")
+            ? _asInt(rec["remaining_shelf_life_days"])
+            : (resolvedShelfLife - widget.daysSinceHarvest).clamp(0, resolvedShelfLife);
+        final effectiveHoldDays = rec.containsKey("effective_hold_days")
+            ? _asInt(rec["effective_hold_days"])
+            : h;
+
+        final backendDecision = (rec["decision"] ?? "NEUTRAL").toString();
+        final resolvedDecision = _resolveDecision(
+          backendDecision: backendDecision,
+          changePct: resolvedChangePct,
+          totalIfHold: totalFromRec,
+          remainingShelfLifeDays: remainingShelfLife,
+          effectiveHoldDays: effectiveHoldDays,
+        );
+        final backendReasoning = (rec["reasoning"] ?? "").toString().trim();
+        final resolvedReasoning = resolvedDecision == backendDecision.toUpperCase()
+            ? backendReasoning
+            : _reasoningForDecision(resolvedDecision, resolvedChangePct);
+
+        final expectedPriceFromRec = rec.containsKey("expected_price")
+            ? _asDouble(rec["expected_price"])
+            : predictedPrice;
+
+        final String bestTimingText = (rec["best_timing_label"] ?? rec["best_timing"] ?? "").toString();
+        final int bestTimingDays = rec.containsKey("best_timing_days")
+            ? _asInt(rec["best_timing_days"])
+            : (remainingShelfLife <= 0
+                ? 0
+                : (resolvedDecision.toUpperCase().contains("SELL") ? 0 : h));
+        final bool isExpired = rec["is_expired"] == true || remainingShelfLife <= 0;
+        final warnings = (rec["warnings"] as List? ?? [])
+            .map((e) => e.toString())
+            .toList();
 
         rows.add({
           "horizon": h,
           "current_price": currentPrice,
           "predicted_price": predictedPrice,
           "change_per_kg": perKgFromRec,
-          "change_pct": rec.containsKey("price_change_percent")
-              ? _asDouble(rec["price_change_percent"])
-              : changePct,
+          "change_pct": resolvedChangePct,
           "total": totalFromRec,
-          "decision": (rec["decision"] ?? "NEUTRAL").toString(),
+          "decision": resolvedDecision,
           "confidence": _asDouble(rec["confidence"] ?? 0),
-          "shelf_life_days": _asInt(rec["shelf_life_days"] ?? 0),
-          "reasoning": (rec["reasoning"] ?? "").toString(),
+          "shelf_life_days": resolvedShelfLife,
+          "remaining_shelf_life_days": remainingShelfLife,
+          "effective_hold_days": effectiveHoldDays,
+          "warnings": warnings,
+          "cost_breakdown": costBreakdown,
+          "profit_analysis": profitAnalysis,
+          "reasoning": resolvedReasoning,
+          "expected_price": expectedPriceFromRec,
+          "best_timing_text": bestTimingText,
+          "best_timing_days": bestTimingDays,
+          "is_expired": isExpired,
         });
       }
 
@@ -157,6 +323,7 @@ class _MarketForecastAnalyticsScreenState
         _history = history;
         _rows = rows;
         _selected = selected;
+        _tomorrow = tomorrowRow;
         _loading = false;
         _saved = true;
       });
@@ -195,6 +362,50 @@ class _MarketForecastAnalyticsScreenState
     if (up.contains("SELL")) return const Color(0xFFE53935);
     if (up.contains("HOLD")) return const Color(0xFF2E7D32);
     return const Color(0xFFFFC107);
+  }
+
+  String _decisionFromChangePct(double changePct) {
+    if (changePct >= 10.0) return "STRONG HOLD";
+    if (changePct >= 2.0) return "HOLD";
+    if (changePct <= -10.0) return "STRONG SELL";
+    if (changePct <= -2.0) return "SELL";
+    return "NEUTRAL";
+  }
+
+  String _resolveDecision({
+    required String backendDecision,
+    required double changePct,
+    required double totalIfHold,
+    int remainingShelfLifeDays = 999,
+    int effectiveHoldDays = 999,
+  }) {
+    final backend = backendDecision.trim().toUpperCase();
+    if (backend.isEmpty) return _decisionFromChangePct(changePct);
+
+    // Shelf-life-based decisions are absolute — never override them
+    if (remainingShelfLifeDays <= 0 || effectiveHoldDays == 0) return backend;
+
+    final byChange = _decisionFromChangePct(changePct);
+    final backendHold = backend.contains("HOLD");
+    final backendSell = backend.contains("SELL");
+    final metricsHold = changePct > 0 && totalIfHold > 0;
+    final metricsSell = changePct < 0 && totalIfHold < 0;
+
+    if ((backendSell && metricsHold) || (backendHold && metricsSell)) {
+      return byChange;
+    }
+    return backend;
+  }
+
+  String _reasoningForDecision(String decision, double changePct) {
+    final pct = _fmt1(changePct.abs());
+    final signed = "${changePct >= 0 ? "+" : ""}${_fmt1(changePct)}";
+    final up = decision.toUpperCase();
+    if (up == "STRONG HOLD") return "Wait for +$pct% profit";
+    if (up == "HOLD") return "Moderate profit opportunity: +$pct%";
+    if (up == "STRONG SELL") return "Sell now to avoid $pct% loss";
+    if (up == "SELL") return "Sell now, holding would lose $pct%";
+    return "Price stable ($signed%), sell when convenient";
   }
 
   String _fallbackReason(double changePct) {
@@ -237,18 +448,54 @@ class _MarketForecastAnalyticsScreenState
       );
     }
 
-    final sel = _selected ?? {};
-    final decision = (sel["decision"] ?? "NEUTRAL").toString();
-    final reasoning = (sel["reasoning"] ?? "").toString();
+    // Tomorrow data — drives the hero decision card (fixed, never changes with horizon)
+    final tmr = _tomorrow ?? {};
+    final tmrDecision = (tmr["decision"] ?? "NEUTRAL").toString();
+    final tmrReasoning = (tmr["reasoning"] ?? "").toString();
+    final tmrCurrentPrice = _asDouble(tmr["current_price"]);
+    final tmrPredictedPrice = _asDouble(tmr["predicted_price"]);
+    final tmrChangePct = _asDouble(tmr["change_pct"]);
+    final tmrShelfLife = _asInt(tmr["shelf_life_days"]);
+    final tmrExpectedPrice = _asDouble(tmr["expected_price"]);
+    final tmrBestTimingText = (tmr["best_timing_text"] ?? "").toString().trim();
+    final tmrBestTimingDays = _asInt(tmr["best_timing_days"]);
+    final tmrBestTimingLabel = tmrShelfLife <= 1
+        ? "Sell Now"
+        : (tmrBestTimingText.isNotEmpty
+            ? tmrBestTimingText
+            : (tmrBestTimingDays >= 0
+                ? (tmrBestTimingDays == 0 ? "Sell Now" : "Hold for $tmrBestTimingDays days")
+                : (tmrDecision.toUpperCase().contains("SELL") ? "Sell Now" : "Hold until Tomorrow")));
+    final tmrWarnings = (tmr["warnings"] as List? ?? []).map((e) => e.toString()).toList();
+    final tmrCostBreakdown = (tmr["cost_breakdown"] as Map?)?.cast<String, dynamic>() ?? {};
+    final tmrProfitAnalysis = (tmr["profit_analysis"] as Map?)?.cast<String, dynamic>() ?? {};
+    final tmrExpenditure = _asDouble(tmrCostBreakdown["transport_cost_now"]) +
+        _asDouble(tmrCostBreakdown["storage_cost_total"]) +
+        _asDouble(tmrCostBreakdown["fixed_cost_total"]);
+    final tmrProfit = tmrProfitAnalysis.containsKey("revenue_if_sell_now")
+        ? _asDouble(tmrProfitAnalysis["revenue_if_sell_now"])
+        : 0.0;
 
-    final currentPrice = _asDouble(sel["current_price"]);
-    final predictedPrice = _asDouble(sel["predicted_price"]);
-    final changePct = _asDouble(sel["change_pct"]);
+    // Selected horizon data — drives quick stats, cost/profit cards, chart
+    final sel = _selected ?? {};
     final changeKg = _asDouble(sel["change_per_kg"]);
     final total = _asDouble(sel["total"]);
     final confidence = _asDouble(sel["confidence"]);
     final shelfLife = _asInt(sel["shelf_life_days"]);
+    final remainingShelfLife = _asInt(sel["remaining_shelf_life_days"] ?? shelfLife);
+    final effectiveHoldDays = _asInt(sel["effective_hold_days"] ?? 0);
+    final warnings = (sel["warnings"] as List? ?? []).map((e) => e.toString()).toList();
+    final costBreakdown = (sel["cost_breakdown"] as Map?)?.cast<String, dynamic>() ?? {};
+    final profitAnalysis = (sel["profit_analysis"] as Map?)?.cast<String, dynamic>() ?? {};
     final selectedH = _asInt(sel["horizon"]);
+    final selectedStorageCost = costBreakdown.containsKey("storage_cost_per_kg_day")
+        ? _asDouble(costBreakdown["storage_cost_per_kg_day"]) * selectedH * widget.quantityKg
+        : _asDouble(costBreakdown["storage_cost_total"]);
+    final expenditure = _asDouble(costBreakdown["transport_cost_now"]) +
+        selectedStorageCost +
+        _asDouble(costBreakdown["fixed_cost_total"]);
+    final profitNow = _asDouble(profitAnalysis["revenue_if_hold"]);
+    final currentPrice = _asDouble(sel["current_price"]);
 
     final List<int> xs = [0, ..._horizons];
     final List<double> ys = [
@@ -259,8 +506,7 @@ class _MarketForecastAnalyticsScreenState
       }).toList()
     ];
 
-    final prices = _historyPrices();
-    final decisionColor = _decisionColor(decision);
+    final decisionColor = _decisionColor(tmrDecision);
 
     return Scaffold(
       backgroundColor: AppColors.surface,
@@ -429,7 +675,7 @@ class _MarketForecastAnalyticsScreenState
                             children: [
                               Expanded(
                                 child: Text(
-                                  decision,
+                                  tmrDecision,
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w900,
@@ -447,9 +693,9 @@ class _MarketForecastAnalyticsScreenState
                                     color: Colors.white.withOpacity(0.25),
                                   ),
                                 ),
-                                child: Text(
-                                  "${selectedH}D",
-                                  style: const TextStyle(
+                                child: const Text(
+                                  "Tomorrow",
+                                  style: TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w900,
                                     fontSize: 12.5,
@@ -460,24 +706,41 @@ class _MarketForecastAnalyticsScreenState
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            reasoning.trim().isNotEmpty
-                                ? reasoning
-                                : _fallbackReason(changePct),
+                            tmrReasoning.trim().isNotEmpty
+                                ? tmrReasoning
+                                : _fallbackReason(tmrChangePct),
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w700,
                               height: 1.25,
                             ),
                           ),
+                          const SizedBox(height: 6),
+                          Text(
+                            "Best timing: $tmrBestTimingLabel",
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              height: 1.25,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            "Expected price: ${_fmt2(tmrExpectedPrice)} LKR/kg",
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              height: 1.25,
+                            ),
+                          ),
                           const SizedBox(height: 12),
                           Row(
                             children: [
-                              _miniPill("Now", "${_fmtLkr(currentPrice)}/kg"),
+                              _miniPill("Tomorrow", "${_fmtLkr(tmrCurrentPrice)}/kg"),
                               const SizedBox(width: 10),
-                              _miniPill(
-                                  "Pred", "${_fmtLkr(predictedPrice)}/kg"),
+                              _miniPill("Profit", _fmtLkr(tmrProfit)),
                               const SizedBox(width: 10),
-                              _miniPill("Change", _fmtPct(changePct)),
+                              _miniPill("Expenditure", _fmtLkr(tmrExpenditure)),
                             ],
                           ),
                         ],
@@ -492,7 +755,7 @@ class _MarketForecastAnalyticsScreenState
                         Expanded(
                           child: _QuickStat(
                             title: "Confidence",
-                            value: _fmtPct(confidence),
+                            value: _fmtPct(confidence > 1 ? confidence : confidence * 100),
                             icon: Icons.verified_rounded,
                           ),
                         ),
@@ -500,7 +763,7 @@ class _MarketForecastAnalyticsScreenState
                         Expanded(
                           child: _QuickStat(
                             title: "Shelf Life",
-                            value: "$shelfLife days",
+                            value: "$remainingShelfLife days",
                             icon: Icons.timelapse_rounded,
                           ),
                         ),
@@ -514,22 +777,60 @@ class _MarketForecastAnalyticsScreenState
                         Expanded(
                           child: _QuickStat(
                             title: "Change / kg",
-                            value: _fmtCompactLkr(changeKg),
+                            value: remainingShelfLife <= 0 ? "N/A" : _fmtCompactLkr(changeKg),
                             icon: Icons.swap_vert_rounded,
-                            valueColor: changeKg >= 0
-                                ? const Color(0xFF2FA36B)
-                                : const Color(0xFFE05C5C),
+                            valueColor: remainingShelfLife <= 0
+                                ? AppColors.textDark
+                                : (changeKg >= 0
+                                    ? const Color(0xFF2FA36B)
+                                    : const Color(0xFFE05C5C)),
                           ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: _QuickStat(
                             title: "Total (Hold)",
-                            value: _fmtCompactLkr(total),
+                            value: remainingShelfLife <= 0 ? "N/A" : _fmtCompactLkr(total),
                             icon: Icons.payments_rounded,
-                            valueColor: total >= 0
-                                ? const Color(0xFF2FA36B)
-                                : const Color(0xFFE05C5C),
+                            valueColor: remainingShelfLife <= 0
+                                ? AppColors.textDark
+                                : (total >= 0
+                                    ? const Color(0xFF2FA36B)
+                                    : const Color(0xFFE05C5C)),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _QuickStat(
+                            title: "Expenditure",
+                            value: expenditure > 0
+                                ? _fmtCompactLkr(expenditure)
+                                : "N/A",
+                            icon: Icons.account_balance_wallet_rounded,
+                            valueColor: const Color(0xFFE05C5C),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _QuickStat(
+                            title: "Profit",
+                            value: remainingShelfLife <= 0
+                                ? "N/A"
+                                : (profitAnalysis.isNotEmpty
+                                    ? _fmtCompactLkr(profitNow)
+                                    : "N/A"),
+                            icon: Icons.trending_up_rounded,
+                            valueColor: remainingShelfLife <= 0
+                                ? AppColors.textDark
+                                : (profitNow >= 0
+                                    ? const Color(0xFF2FA36B)
+                                    : const Color(0xFFE05C5C)),
                           ),
                         ),
                       ],
@@ -548,7 +849,6 @@ class _MarketForecastAnalyticsScreenState
                           final ckg = _asDouble(r["change_per_kg"]);
                           final pct = _asDouble(r["change_pct"]);
                           final tot = _asDouble(r["total"]);
-                          final dec = (r["decision"] ?? "NEUTRAL").toString();
                           final isSelected = h == selectedH;
 
                           final bg = isSelected
@@ -572,8 +872,7 @@ class _MarketForecastAnalyticsScreenState
                                 boxShadow: [
                                   if (isSelected)
                                     BoxShadow(
-                                      color:
-                                          AppColors.primary.withOpacity(0.12),
+                                      color: AppColors.primary.withOpacity(0.12),
                                       blurRadius: 18,
                                       offset: const Offset(0, 12),
                                     )
@@ -588,10 +887,8 @@ class _MarketForecastAnalyticsScreenState
                                         height: 34,
                                         decoration: BoxDecoration(
                                           color: Colors.white,
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                          border: Border.all(
-                                              color: AppColors.border),
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(color: AppColors.border),
                                         ),
                                         child: Icon(
                                           Icons.calendar_month_rounded,
@@ -608,35 +905,16 @@ class _MarketForecastAnalyticsScreenState
                                         ),
                                       ),
                                       const Spacer(),
-                                      Container(
-                                        width: 10,
-                                        height: 10,
-                                        decoration: BoxDecoration(
-                                          color: _dotColor(dec),
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        dec,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w900,
-                                          color: AppColors.textDark,
-                                        ),
-                                      ),
                                       if (isSelected) ...[
                                         const SizedBox(width: 10),
                                         Container(
                                           padding: const EdgeInsets.symmetric(
                                               horizontal: 10, vertical: 6),
                                           decoration: BoxDecoration(
-                                            color: AppColors.darkGreen
-                                                .withOpacity(0.10),
-                                            borderRadius:
-                                                BorderRadius.circular(999),
+                                            color: AppColors.darkGreen.withOpacity(0.10),
+                                            borderRadius: BorderRadius.circular(999),
                                             border: Border.all(
-                                              color: AppColors.darkGreen
-                                                  .withOpacity(0.22),
+                                              color: AppColors.darkGreen.withOpacity(0.22),
                                             ),
                                           ),
                                           child: const Text(
@@ -672,25 +950,226 @@ class _MarketForecastAnalyticsScreenState
 
                     const SizedBox(height: 12),
 
+                    // ✅ Tomorrow warnings (from the hero card data)
+                    if (tmrWarnings.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF3E0),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: const Color(0xFFFFB74D)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.warning_amber_rounded,
+                                    color: Color(0xFFE65100), size: 20),
+                                const SizedBox(width: 8),
+                                const Text(
+                                  "TOMORROW WARNINGS",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    color: Color(0xFFE65100),
+                                    fontSize: 13,
+                                    letterSpacing: 1,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            ...tmrWarnings.map((w) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 6),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text("• ",
+                                          style: TextStyle(
+                                              color: Color(0xFFE65100),
+                                              fontWeight: FontWeight.w900)),
+                                      Expanded(
+                                        child: Text(
+                                          w,
+                                          style: const TextStyle(
+                                            color: Color(0xFFBF360C),
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // ✅ Warnings card (only shown if backend returned warnings)
+                    if (warnings.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF3E0),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: const Color(0xFFFFB74D)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.warning_amber_rounded,
+                                    color: Color(0xFFE65100), size: 20),
+                                const SizedBox(width: 8),
+                                const Text(
+                                  "WARNINGS",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    color: Color(0xFFE65100),
+                                    fontSize: 13,
+                                    letterSpacing: 1,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            ...warnings.map((w) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 6),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text("• ",
+                                          style: TextStyle(
+                                              color: Color(0xFFE65100),
+                                              fontWeight: FontWeight.w900)),
+                                      Expanded(
+                                        child: Text(
+                                          w,
+                                          style: const TextStyle(
+                                            color: Color(0xFFBF360C),
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // ✅ Perishability card
+                    _card(
+                      title: "Perishability",
+                      subtitle: "Shelf life & safe hold period",
+                      child: Column(
+                        children: [
+                          _kv("Shelf Life", "$shelfLife days"),
+                          const SizedBox(height: 10),
+                          _kv("Days Since Harvest",
+                              "${widget.daysSinceHarvest} days"),
+                          const SizedBox(height: 10),
+                          _kv("Remaining Shelf Life",
+                              "$remainingShelfLife days"),
+                          const SizedBox(height: 10),
+                          _kv("Effective Hold Days",
+                              "$effectiveHoldDays days"),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // ✅ Cost breakdown card (only shown if data available)
+                    if (costBreakdown.isNotEmpty) ...[
+                      _card(
+                        title: "Cost Breakdown",
+                        subtitle: "Transport, storage & fixed costs",
+                        child: Column(
+                          children: [
+                            if (costBreakdown["transport_cost_per_kg"] != null)
+                              _kv("Transport / kg",
+                                  "${_fmtLkr(_asDouble(costBreakdown["transport_cost_per_kg"]))}"),
+                            if (costBreakdown["transport_cost_per_kg"] != null)
+                              const SizedBox(height: 10),
+                            if (costBreakdown["storage_cost_per_kg_day"] != null)
+                              _kv("Storage / kg / day",
+                                  "${_fmtLkr(_asDouble(costBreakdown["storage_cost_per_kg_day"]))}"),
+                            if (costBreakdown["storage_cost_per_kg_day"] != null)
+                              const SizedBox(height: 10),
+                            if (costBreakdown["storage_cost_total"] != null)
+                              _kv("Total Storage Cost",
+                                  _fmtLkr(selectedStorageCost)),
+                            if (costBreakdown["storage_cost_total"] != null)
+                              const SizedBox(height: 10),
+                            if (costBreakdown["transport_cost_now"] != null)
+                              _kv("Transport (Sell Now)",
+                                  _fmtLkr(_asDouble(costBreakdown["transport_cost_now"]))),
+                            if (costBreakdown["transport_cost_now"] != null)
+                              const SizedBox(height: 10),
+                            if (costBreakdown["transport_cost_later"] != null)
+                              _kv("Transport (If Hold)",
+                                  _fmtLkr(_asDouble(costBreakdown["transport_cost_later"]))),
+                            if (costBreakdown["fixed_cost_total"] != null &&
+                                _asDouble(costBreakdown["fixed_cost_total"]) > 0) ...[
+                              const SizedBox(height: 10),
+                              _kv("Fixed Cost",
+                                  _fmtLkr(_asDouble(costBreakdown["fixed_cost_total"]))),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // ✅ Profit analysis card (only shown if data available)
+                    if (profitAnalysis.isNotEmpty) ...[
+                      _card(
+                        title: "Profit Analysis",
+                        subtitle: "Revenue & profit comparison",
+                        child: Column(
+                          children: [
+                            if (profitAnalysis["revenue_if_sell_now"] != null)
+                              _kv("Revenue (Sell Now)",
+                                  _fmtLkr(_asDouble(profitAnalysis["revenue_if_sell_now"]))),
+                            if (profitAnalysis["revenue_if_sell_now"] != null)
+                              const SizedBox(height: 10),
+                            if (profitAnalysis["revenue_if_hold"] != null)
+                              _kv("Revenue (If Hold)",
+                                  _fmtLkr(_asDouble(profitAnalysis["revenue_if_hold"]))),
+                            if (profitAnalysis["revenue_if_hold"] != null)
+                              const SizedBox(height: 10),
+                            if (profitAnalysis["profit_difference"] != null)
+                              _kv("Profit Difference",
+                                  _fmtLkr(_asDouble(profitAnalysis["profit_difference"]))),
+                            if (profitAnalysis["profit_difference"] != null)
+                              const SizedBox(height: 10),
+                            if (profitAnalysis["profit_change_percent"] != null)
+                              _kv("Profit Change",
+                                  _fmtPct(_asDouble(profitAnalysis["profit_change_percent"]))),
+                            if (profitAnalysis["spoilage_loss_percent"] != null) ...[
+                              const SizedBox(height: 10),
+                              _kv("Spoilage Loss",
+                                  _fmtPct(_asDouble(profitAnalysis["spoilage_loss_percent"]))),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
                     // ✅ Forecast chart
                     _card(
                       title: "Price Forecast",
                       subtitle: "Now vs future horizons",
                       child: SizedBox(
                         height: 210,
-                        child: _ForecastChart(xDays: xs, prices: ys),
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // ✅ History chart
-                    _card(
-                      title: "Price History",
-                      subtitle: "Last 30 days",
-                      child: SizedBox(
-                        height: 170,
-                        child: _LineChart(values: prices),
+                        child: _ForecastChart(xDays: xs, prices: ys, selectedDay: selectedH),
                       ),
                     ),
 
@@ -1000,12 +1479,13 @@ class _QuickStat extends StatelessWidget {
 class _ForecastChart extends StatelessWidget {
   final List<int> xDays;
   final List<double> prices;
-  const _ForecastChart({required this.xDays, required this.prices});
+  final int selectedDay;
+  const _ForecastChart({required this.xDays, required this.prices, required this.selectedDay});
 
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
-      painter: _ForecastPainter(xDays: xDays, prices: prices),
+      painter: _ForecastPainter(xDays: xDays, prices: prices, selectedDay: selectedDay),
       child: const SizedBox.expand(),
     );
   }
@@ -1014,8 +1494,9 @@ class _ForecastChart extends StatelessWidget {
 class _ForecastPainter extends CustomPainter {
   final List<int> xDays;
   final List<double> prices;
+  final int selectedDay;
 
-  _ForecastPainter({required this.xDays, required this.prices});
+  _ForecastPainter({required this.xDays, required this.prices, required this.selectedDay});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1151,6 +1632,14 @@ class _ForecastPainter extends CustomPainter {
     for (int i = 0; i < prices.length; i++) {
       final p = pt(xDays[i], prices[i]);
       canvas.drawCircle(p, 3.6, dotPaint);
+    }
+
+    // Highlight selected horizon
+    final selIdx = xDays.indexOf(selectedDay);
+    if (selIdx >= 0) {
+      final selPt = pt(xDays[selIdx], prices[selIdx]);
+      canvas.drawCircle(selPt, 9, Paint()..color = AppColors.primary.withOpacity(0.20));
+      canvas.drawCircle(selPt, 5.5, Paint()..color = AppColors.primary);
     }
 
     // Red star at current (x=0)

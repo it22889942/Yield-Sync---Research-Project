@@ -49,7 +49,7 @@ def save_last_yield(payload_inputs: dict, yield_kg_per_acre: float):
     try:
         record = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
-            "yield_kg_per_acre": float(yield_kg_per_acre),
+            "fertilizer_per_acre": float(yield_kg_per_acre),
             "inputs_used": SUMMARY.get("inputs_used", []),
             "inputs_payload": payload_inputs or {},
         }
@@ -94,7 +94,7 @@ def index():
             "POST /api/fertiliser/total-yield": {
                 "body": {
                     "area_acres": 2.5,
-                    "yield_kg_per_acre": "(optional) override; otherwise use the last saved prediction"
+                    "fertilizer_per_acre": "(optional) override; otherwise use the last saved prediction"
                 }
             },
             "POST /api/fertiliser/total-fertiliser": {
@@ -130,7 +130,7 @@ def predict():
     result = {
         "inputs_used": SUMMARY.get("inputs_used", []),
         "fertiliser_type": None,
-        "yield_kg_per_acre": None
+        "fertilizer_per_acre": None
     }
 
     # classification
@@ -146,7 +146,7 @@ def predict():
         try:
             y_pred = REG_MODEL.predict(X)[0]
             y_pred = float(round(y_pred, 2))
-            result["yield_kg_per_acre"] = y_pred
+            result["fertilizer_per_acre"] = y_pred
             save_last_yield(payload_inputs=data, yield_kg_per_acre=y_pred)
         except Exception as e:
             result["yield_error"] = str(e)
@@ -162,21 +162,21 @@ def total_yield():
 
     area = float(body["area_acres"])
 
-    if "yield_kg_per_acre" in body and body["yield_kg_per_acre"] is not None:
-        ypa = float(body["yield_kg_per_acre"])
+    if "fertilizer_per_acre" in body and body["fertilizer_per_acre"] is not None:
+        ypa = float(body["fertilizer_per_acre"])
         source = "provided"
     else:
         last = load_last_yield()
-        if not last or "yield_kg_per_acre" not in last:
-            return jsonify({"error": "No last yield found. Call /predict first or provide yield_kg_per_acre."}), 400
-        ypa = float(last["yield_kg_per_acre"])
+        if not last or "fertilizer_per_acre" not in last:
+            return jsonify({"error": "No last yield found. Call /predict first or provide fertilizer_per_acre."}), 400
+        ypa = float(last["fertilizer_per_acre"])
         source = "last_prediction"
 
     total = round(ypa * area, 2)
     return jsonify({
         "area_acres": area,
-        "yield_kg_per_acre": ypa,
-        "total_yield_kg": total,
+        "fertilizer_per_acre": ypa,
+        "total_fertilizer_per_acre_kg": total,
         "source": source
     })
 

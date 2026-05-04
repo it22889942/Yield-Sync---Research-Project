@@ -5,6 +5,7 @@ import '../config/api_client.dart';
 
 class MarketApi {
   static const Duration _timeout = Duration(seconds: 25);
+  static const Duration _updateTimeout = Duration(minutes: 5);
   static const Duration _retrainTimeout = Duration(minutes: 40);
 
   // ✅ ngrok + JSON-safe headers
@@ -211,16 +212,28 @@ class MarketApi {
     required String market,
     required int daysAhead,
     required double quantityKg,
+    int daysSinceHarvest = 0,
+    double? transportCostPerKg,
+    double? storageCostPerKgDay,
+    double? fixedCostTotal,
+    double? spoilageRate,
   }) async {
+    final body = <String, dynamic>{
+      "crop": crop,
+      "market": market,
+      "days_ahead": daysAhead,
+      "quantity_kg": quantityKg,
+      "days_since_harvest": daysSinceHarvest,
+    };
+    if (transportCostPerKg != null) body["transport_cost_per_kg"] = transportCostPerKg;
+    if (storageCostPerKgDay != null) body["storage_cost_per_kg_day"] = storageCostPerKgDay;
+    if (fixedCostTotal != null) body["fixed_cost_total"] = fixedCostTotal;
+    if (spoilageRate != null) body["spoilage_rate"] = spoilageRate;
+
     final res = await _post(
       "/api/yieldsync/recommendation",
       endpointName: "Get recommendation",
-      body: {
-        "crop": crop,
-        "market": market,
-        "days_ahead": daysAhead,
-        "quantity_kg": quantityKg,
-      },
+      body: body,
     );
 
     return _decodeJsonObject(res, endpointName: "Get recommendation");
@@ -321,6 +334,7 @@ class MarketApi {
       "/api/yieldsync/data/update-smart",
       endpointName: "Update latest week",
       body: body,
+      timeout: _updateTimeout,
     );
 
     return _decodeJsonObject(res, endpointName: "Update latest week");

@@ -1,21 +1,39 @@
 import 'package:flutter/material.dart';
-import '../../utils/app_colors.dart';
+
 import '../../services/app_routes.dart';
+import '../../services/auth_service.dart';
+import '../../utils/app_colors.dart';
 import '../widgets/app_shell.dart';
 
-class MarketScreen extends StatelessWidget {
+class MarketScreen extends StatefulWidget {
   const MarketScreen({super.key});
 
-  // ✅ image asset path
+  @override
+  State<MarketScreen> createState() => _MarketScreenState();
+}
+
+class _MarketScreenState extends State<MarketScreen> {
   static const String _marketImage = "assets/images/paddymarket.jpeg";
+
+  late final Future<bool> _isAdminFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _isAdminFuture = _loadIsAdmin();
+  }
+
+  Future<bool> _loadIsAdmin() async {
+    final userType = await AuthService().getCurrentUserType();
+    return userType == "admin";
+  }
 
   @override
   Widget build(BuildContext context) {
     return AppShell(
-      currentIndex: 0, // keep Home active
+      currentIndex: 0,
       child: Column(
         children: [
-          // ===== HEADER (modern) =====
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
@@ -33,8 +51,11 @@ class MarketScreen extends StatelessWidget {
                   top: 16,
                   child: Opacity(
                     opacity: 0.10,
-                    child: Icon(Icons.show_chart_rounded,
-                        size: 150, color: Colors.white),
+                    child: Icon(
+                      Icons.show_chart_rounded,
+                      size: 150,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
                 const Positioned(
@@ -42,8 +63,11 @@ class MarketScreen extends StatelessWidget {
                   bottom: -18,
                   child: Opacity(
                     opacity: 0.10,
-                    child: Icon(Icons.storefront_rounded,
-                        size: 140, color: Colors.white),
+                    child: Icon(
+                      Icons.storefront_rounded,
+                      size: 140,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
                 Column(
@@ -72,8 +96,10 @@ class MarketScreen extends StatelessWidget {
                           child: CircleAvatar(
                             radius: 18,
                             backgroundColor: Colors.white.withOpacity(0.12),
-                            child: const Icon(Icons.person_rounded,
-                                color: Colors.white),
+                            child: const Icon(
+                              Icons.person_rounded,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ],
@@ -97,19 +123,23 @@ class MarketScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
-
-                    // ✅ small “info chips”
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       alignment: WrapAlignment.center,
                       children: const [
                         _HeaderChip(
-                            icon: Icons.trending_up_rounded, text: "Trends"),
+                          icon: Icons.trending_up_rounded,
+                          text: "Trends",
+                        ),
                         _HeaderChip(
-                            icon: Icons.insights_rounded, text: "Analytics"),
+                          icon: Icons.insights_rounded,
+                          text: "Analytics",
+                        ),
                         _HeaderChip(
-                            icon: Icons.history_rounded, text: "Compare"),
+                          icon: Icons.history_rounded,
+                          text: "Compare",
+                        ),
                       ],
                     ),
                   ],
@@ -117,15 +147,11 @@ class MarketScreen extends StatelessWidget {
               ],
             ),
           ),
-
           const SizedBox(height: 14),
-
-          // ===== BODY =====
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               children: [
-                // ✅ IMAGE CARD (asset image)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
@@ -143,7 +169,6 @@ class MarketScreen extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      // ✅ Replaced placeholder with image
                       ClipRRect(
                         borderRadius: BorderRadius.circular(22),
                         child: SizedBox(
@@ -163,7 +188,6 @@ class MarketScreen extends StatelessWidget {
                           ),
                         ),
                       ),
-
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
@@ -187,15 +211,18 @@ class MarketScreen extends StatelessWidget {
                               ),
                             ),
                             const SizedBox(height: 10),
-                            Row(
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
                               children: const [
                                 _MiniPill(
-                                    icon: Icons.timer_rounded,
-                                    text: "7/14/30 days"),
-                                SizedBox(width: 8),
+                                  icon: Icons.timer_rounded,
+                                  text: "7/14/30 days",
+                                ),
                                 _MiniPill(
-                                    icon: Icons.security_rounded,
-                                    text: "Saved history"),
+                                  icon: Icons.security_rounded,
+                                  text: "Saved history",
+                                ),
                               ],
                             ),
                           ],
@@ -204,9 +231,7 @@ class MarketScreen extends StatelessWidget {
                     ],
                   ),
                 ),
-
                 const SizedBox(height: 14),
-
                 _MarketActionCard(
                   title: "Forecast Input",
                   subtitle: "Select crop, market & horizon",
@@ -217,7 +242,6 @@ class MarketScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-
                 _MarketActionCard(
                   title: "Comparison & History",
                   subtitle: "Compare markets and previous runs",
@@ -227,20 +251,30 @@ class MarketScreen extends StatelessWidget {
                     AppRoutes.marketComparisonHistory,
                   ),
                 ),
-                const SizedBox(height: 12),
+                FutureBuilder<bool>(
+                  future: _isAdminFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.data != true) {
+                      return const SizedBox.shrink();
+                    }
 
-                _MarketActionCard(
-                  title: "Update Data & Train",
-                  subtitle: "Fetch latest week and retrain models",
-                  icon: Icons.sync_alt_rounded,
-                  onTap: () => Navigator.pushNamed(
-                    context,
-                    AppRoutes.marketDataUpdate,
-                  ),
+                    return Column(
+                      children: [
+                        const SizedBox(height: 12),
+                        _MarketActionCard(
+                          title: "Update Data & Train",
+                          subtitle: "Fetch latest week and retrain models",
+                          icon: Icons.sync_alt_rounded,
+                          onTap: () => Navigator.pushNamed(
+                            context,
+                            AppRoutes.marketDataUpdate,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
-
                 const SizedBox(height: 14),
-
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -258,8 +292,10 @@ class MarketScreen extends StatelessWidget {
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(color: AppColors.border),
                         ),
-                        child: Icon(Icons.lightbulb_rounded,
-                            color: AppColors.textDark.withOpacity(0.75)),
+                        child: Icon(
+                          Icons.lightbulb_rounded,
+                          color: AppColors.textDark.withOpacity(0.75),
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -282,8 +318,6 @@ class MarketScreen extends StatelessWidget {
     );
   }
 }
-
-// ===================== SMALL WIDGETS =====================
 
 class _HeaderChip extends StatelessWidget {
   final IconData icon;
@@ -424,8 +458,11 @@ class _MarketActionCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(Icons.arrow_forward_ios_rounded,
-                  size: 16, color: AppColors.textDark.withOpacity(0.35)),
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 16,
+                color: AppColors.textDark.withOpacity(0.35),
+              ),
             ],
           ),
         ),

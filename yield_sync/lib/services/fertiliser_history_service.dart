@@ -29,8 +29,8 @@ class FertiliserHistoryService {
   // ✅ NEW: save total-yield calculation
   Future<void> saveTotalYieldCalc({
     required double areaAcres,
-    required double yieldKgPerAcre,
-    required double totalYieldKg,
+    required double fertilizerPerAcre,
+    required double totalFertilizerPerAcreKg,
     required String source,
     required String fertiliserType,
     required String cropLabel,
@@ -48,8 +48,8 @@ class FertiliserHistoryService {
         .add({
       "uid": uid,
       "area_acres": areaAcres,
-      "yield_kg_per_acre": yieldKgPerAcre,
-      "total_yield_kg": totalYieldKg,
+      "fertilizer_per_acre": fertilizerPerAcre,
+      "total_fertilizer_per_acre_kg": totalFertilizerPerAcreKg,
       "source": source,
       "fertiliser_type": fertiliserType,
       "crop": cropLabel,

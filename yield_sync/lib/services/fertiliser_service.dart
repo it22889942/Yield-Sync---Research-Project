@@ -5,19 +5,19 @@ import '../config/api_client.dart';
 
 class FertiliserPredictResult {
   final String fertiliserType;
-  final double? yieldKgPerAcre;
+  final double? fertilizerPerAcre;
   final Map<String, dynamic> raw;
 
   FertiliserPredictResult({
     required this.fertiliserType,
-    required this.yieldKgPerAcre,
+    required this.fertilizerPerAcre,
     required this.raw,
   });
 
   factory FertiliserPredictResult.fromBackend(Map<String, dynamic> json) {
     final ft = (json["fertiliser_type"] ?? "").toString();
 
-    final y = json["yield_kg_per_acre"];
+    final y = json["fertilizer_per_acre"];
     double? ypa;
     if (y is num) {
       ypa = y.toDouble();
@@ -29,28 +29,28 @@ class FertiliserPredictResult {
 
     return FertiliserPredictResult(
       fertiliserType: ft,
-      yieldKgPerAcre: ypa,
+      fertilizerPerAcre: ypa,
       raw: json,
     );
   }
 
   Map<String, dynamic> toJson() => {
         "fertiliserType": fertiliserType,
-        "yieldKgPerAcre": yieldKgPerAcre,
+        "fertilizerPerAcre": fertilizerPerAcre,
         "raw": raw,
       };
 }
 
 class TotalYieldResult {
   final double areaAcres;
-  final double yieldKgPerAcre;
-  final double totalYieldKg;
+  final double fertilizerPerAcre;
+  final double totalFertilizerPerAcreKg;
   final String source;
 
   TotalYieldResult({
     required this.areaAcres,
-    required this.yieldKgPerAcre,
-    required this.totalYieldKg,
+    required this.fertilizerPerAcre,
+    required this.totalFertilizerPerAcreKg,
     required this.source,
   });
 
@@ -62,8 +62,8 @@ class TotalYieldResult {
 
     return TotalYieldResult(
       areaAcres: _toDouble(json["area_acres"]),
-      yieldKgPerAcre: _toDouble(json["yield_kg_per_acre"]),
-      totalYieldKg: _toDouble(json["total_yield_kg"]),
+      fertilizerPerAcre: _toDouble(json["fertilizer_per_acre"]),
+      totalFertilizerPerAcreKg: _toDouble(json["total_fertilizer_per_acre_kg"]),
       source: (json["source"] ?? "").toString(),
     );
   }
@@ -112,14 +112,14 @@ class FertiliserService {
 
   static Future<TotalYieldResult> totalYield({
     required double areaAcres,
-    required double yieldKgPerAcre,
+    required double fertilizerPerAcre,
   }) async {
     final ts = DateTime.now().millisecondsSinceEpoch;
     final uri = ApiClient.url("/api/fertiliser/total-yield?ts=$ts");
 
     final body = {
       "area_acres": areaAcres,
-      "yield_kg_per_acre": yieldKgPerAcre,
+      "fertilizer_per_acre": fertilizerPerAcre,
     };
 
     final res = await http.post(
