@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-02-27T22:54:55.530205Z",
-  "yield_kg_per_acre": 105.37,
+  "timestamp": "2026-05-04T11:40:47.748093Z",
+  "fertilizer_per_acre": 104.95,
   "inputs_used": [
     "temperature",
     "ph",
@@ -12,11 +12,11 @@
     "growth_stage"
   ],
   "inputs_payload": {
-    "temperature": 28,
-    "ph": 5,
-    "nitrogen": 56,
-    "phosphorous": 43,
-    "potassium": 65,
+    "temperature": 28.3,
+    "ph": 5.5,
+    "nitrogen": 82.0,
+    "phosphorous": 145.0,
+    "potassium": 137.0,
     "crop": "Rice",
     "growth_stage": "flowering"
   }

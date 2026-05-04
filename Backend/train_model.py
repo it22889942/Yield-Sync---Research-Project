@@ -144,16 +144,16 @@ labour_rows = _load_labour_from_firestore()
 equip_rows = _load_equipment_from_firestore()
 
 if labour_rows is not None:
-    print("📥 Loading labour dataset from Firestore (labours)")
+    print("Loading labour dataset from Firestore (labours)")
     DF_labour = pd.DataFrame(labour_rows)
 else:
-    print("📥 Reading labour dataset from Excel:", LABOUR_DATA_PATH)
+    print("Reading labour dataset from Excel:", LABOUR_DATA_PATH)
     DF_labour = pd.read_excel(LABOUR_DATA_PATH)
 if equip_rows is not None:
-    print("📥 Loading equipment dataset from Firestore (equipments)")
+    print("Loading equipment dataset from Firestore (equipments)")
     DF_equip = pd.DataFrame(equip_rows)
 else:
-    print("📥 Reading equipment dataset from Excel:", EQUIP_DATA_PATH)
+    print("Reading equipment dataset from Excel:", EQUIP_DATA_PATH)
     DF_equip = pd.read_excel(EQUIP_DATA_PATH)
 
 DF_labour.columns = [str(c).strip() for c in DF_labour.columns]

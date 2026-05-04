@@ -781,13 +781,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 8),
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
                     _pill(
                       icon: Icons.verified_user_rounded,
                       text: _typeText,
                     ),
-                    const SizedBox(width: 8),
                     _pill(
                       icon: Icons.phone_rounded,
                       text: _phoneCtrl.text.trim().isEmpty
@@ -825,31 +826,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _pill({required IconData icon, required String text}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.14),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withOpacity(0.18)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: Colors.white),
-          const SizedBox(width: 6),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 170),
-            child: Text(
-              text.isEmpty ? "—" : text,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const reserved =
+            10.0 * 2 + 16.0 + 6.0; // pill padding + icon + gap before text
+        final maxText = constraints.maxWidth.isFinite
+            ? (constraints.maxWidth - reserved).clamp(40.0, 170.0)
+            : 170.0;
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.14),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.white.withOpacity(0.18)),
           ),
-        ],
-      ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: Colors.white),
+              const SizedBox(width: 6),
+              SizedBox(
+                width: maxText,
+                child: Text(
+                  text.isEmpty ? "—" : text,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
