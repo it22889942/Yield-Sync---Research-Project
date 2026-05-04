@@ -12,6 +12,13 @@ import 'equipment_rent_screen.dart';
 
 enum _SortMode { best, cheapest, rating }
 
+/// Parsed from natural-language smart search (e.g. "below 1700").
+class _SmartPriceCap {
+  const _SmartPriceCap({required this.value, required this.hourly});
+  final double value;
+  final bool hourly;
+}
+
 class EquipmentListScreen extends StatefulWidget {
   const EquipmentListScreen({super.key});
 
@@ -20,6 +27,21 @@ class EquipmentListScreen extends StatefulWidget {
 }
 
 class _EquipmentListScreenState extends State<EquipmentListScreen> {
+  /// Words users type in smart search that map to [EquipmentListItem.equipmentType] text.
+  static const List<String> _equipmentNlKeywords = [
+    'harvester',
+    'rotavator',
+    'tractor',
+    'plough',
+    'plow',
+    'sprayer',
+    'cultivator',
+    'trailer',
+    'baler',
+    'mower',
+    'tiller',
+  ];
+
   final _searchCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
@@ -126,7 +148,6 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
   bool _useSemanticSearch = true;
 
   _SortMode _sort = _SortMode.best;
-  String? _primaryLocationFromQuery;
 
   @override
   void didChangeDependencies() {
@@ -214,7 +235,6 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
 
     try {
       final q = _searchCtrl.text.trim();
-      _primaryLocationFromQuery = _extractLocationFromQuery(q);
 
       List<EquipmentListItem> list;
 
@@ -231,12 +251,30 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
 
         final recs = await RecommendationApi.recommendEquipment(
           query: composedQuery.isEmpty ? _args.location : composedQuery,
-          topK: 30,
+          topK: 50,
         );
         list = recs
             .map((e) =>
                 EquipmentListItem.fromJson(Map<String, dynamic>.from(e)))
             .toList();
+        list = _refineSmartRecommendationResults(list, q, _args.type);
+        // Recommender may omit sub-areas (e.g. Wariyapola); merge strict Firestore search
+        // so "In <area>" always includes DB matches for the selected place.
+        if (_args.location.trim().isNotEmpty) {
+          try {
+            final strict = await EquipmentApi.search(
+              query: q,
+              location: _args.location,
+              type: _args.type,
+              topK: 40,
+            );
+            final strictRefined =
+                _refineSmartRecommendationResults(strict, q, _args.type);
+            list = _mergeEquipmentByIdPreferFirst(strictRefined, list);
+          } catch (_) {
+            // keep recommendation-only list
+          }
+        }
       } else {
         list = await EquipmentApi.search(
           query: q,
@@ -272,6 +310,124 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
     final loc = m.group(1)?.trim();
     if (loc == null || loc.isEmpty) return null;
     return loc;
+  }
+
+  /// Prefer explicit `... in District` from the search box; otherwise use the location dropdown.
+  String? _locationGroupKey() {
+    final fromQuery = _extractLocationFromQuery(_searchCtrl.text.trim());
+    if (fromQuery != null && fromQuery.trim().isNotEmpty) {
+      return fromQuery.trim();
+    }
+    final d = _selectedLocation.trim();
+    return d.isEmpty ? null : d;
+  }
+
+  /// Dedupe by id; [first] is usually `/api/equipment/search` so local rows appear at the top of the list.
+  List<EquipmentListItem> _mergeEquipmentByIdPreferFirst(
+    List<EquipmentListItem> first,
+    List<EquipmentListItem> second,
+  ) {
+    final seen = <String>{};
+    final out = <EquipmentListItem>[];
+    void take(EquipmentListItem e) {
+      final id = e.id.trim();
+      if (id.isEmpty) {
+        out.add(e);
+        return;
+      }
+      if (seen.add(id)) out.add(e);
+    }
+
+    for (final e in first) {
+      take(e);
+    }
+    for (final e in second) {
+      take(e);
+    }
+    return out;
+  }
+
+  /// Semantic `/api/recommend/recommend` does not strictly enforce price or type; tighten results here.
+  List<EquipmentListItem> _refineSmartRecommendationResults(
+    List<EquipmentListItem> items,
+    String rawQuery,
+    String typeChip,
+  ) {
+    var out = List<EquipmentListItem>.from(items);
+    final q = rawQuery.trim().toLowerCase();
+
+    final chip = typeChip.trim();
+    if (chip.isNotEmpty) {
+      final needle = chip.toLowerCase();
+      out = out
+          .where((e) => e.equipmentType.toLowerCase().contains(needle))
+          .toList();
+    } else {
+      final hints = _equipmentKeywordsSpokenInQuery(q);
+      if (hints.isNotEmpty) {
+        out = out.where((e) {
+          final t = e.equipmentType.toLowerCase();
+          return hints.any((h) {
+            if (h == 'plough') return t.contains('plough') || t.contains('plow');
+            return t.contains(h);
+          });
+        }).toList();
+      }
+    }
+
+    final cap = _parseSmartPriceCap(rawQuery);
+    if (cap != null) {
+      if (cap.hourly) {
+        out = out.where((e) => e.hourlyRate <= cap.value + 1e-9).toList();
+      } else {
+        out = out.where((e) => e.dailyRate <= cap.value + 1e-9).toList();
+      }
+    }
+
+    return out;
+  }
+
+  List<String> _equipmentKeywordsSpokenInQuery(String qLower) {
+    final found = <String>[];
+    for (final kw in _equipmentNlKeywords) {
+      if (RegExp(r'\b' + RegExp.escape(kw) + r'\b', caseSensitive: false)
+          .hasMatch(qLower)) {
+        found.add(kw);
+      }
+    }
+    return found;
+  }
+
+  _SmartPriceCap? _parseSmartPriceCap(String raw) {
+    final lower = raw.trim().toLowerCase();
+    final re = RegExp(
+      r'(?:below|under|less\s+than|at\s+most|max|maximum|up\s*to|upto|<=?)\s*(?:lkr|rs\.?)?\s*(\d+(?:\.\d+)?)',
+      caseSensitive: false,
+    );
+    final m = re.firstMatch(lower);
+    if (m == null) return null;
+    final v = double.tryParse(m.group(1)!);
+    if (v == null || v <= 0) return null;
+
+    final hourlyHint = RegExp(
+            r'(per\s*hour|/\s*hr|hourly|\d\s*/\s*hr)',
+            caseSensitive: false)
+        .hasMatch(lower);
+    final dailyHint =
+        RegExp(r'(per\s*day|daily|/\s*day)', caseSensitive: false)
+            .hasMatch(lower);
+
+    if (hourlyHint && !dailyHint) {
+      return _SmartPriceCap(value: v, hourly: true);
+    }
+    if (dailyHint && !hourlyHint) {
+      return _SmartPriceCap(value: v, hourly: false);
+    }
+    // Typical LKR: hourly caps are smaller; daily rent is larger.
+    if (v <= 5000) {
+      return _SmartPriceCap(value: v, hourly: true);
+    }
+    return _SmartPriceCap(value: v, hourly: false);
   }
 
   void _applySortAndFilter() {
@@ -756,19 +912,19 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final primaryKey = _primaryLocationFromQuery?.toLowerCase().trim();
+    final areaKey = _locationGroupKey()?.toLowerCase().trim();
     final list = _view;
 
     List<EquipmentListItem> primary = list;
     List<EquipmentListItem> others = const [];
 
-    if (primaryKey != null && primaryKey.isNotEmpty) {
+    if (areaKey != null && areaKey.isNotEmpty) {
       bool matches(EquipmentListItem e) {
-        final loc = (e.nearestMajorDistrict.isNotEmpty
-                ? e.nearestMajorDistrict
-                : e.location)
-            .toLowerCase();
-        return loc.contains(primaryKey);
+        // Recommend API rows sometimes populate only `location` or only
+        // `nearest_major_district`; check both so we don't mis-label into "Other locations".
+        final mainLoc = e.location.toLowerCase();
+        final nearLoc = e.nearestMajorDistrict.toLowerCase();
+        return mainLoc.contains(areaKey) || nearLoc.contains(areaKey);
       }
 
       primary = list.where(matches).toList();
@@ -791,7 +947,13 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
                   ),
                   slivers: [
                     SliverToBoxAdapter(child: _heroHeader()),
-                    ..._equipmentListResultSlivers(primary, others),
+                    ..._equipmentListResultSlivers(
+                      primary,
+                      others,
+                      areaLabel: _selectedLocation.trim(),
+                      areaFilterActive:
+                          areaKey != null && areaKey.isNotEmpty,
+                    ),
                   ],
                 ),
               ),
@@ -834,8 +996,10 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
 
   List<Widget> _equipmentListResultSlivers(
     List<EquipmentListItem> primary,
-    List<EquipmentListItem> others,
-  ) {
+    List<EquipmentListItem> others, {
+    required String areaLabel,
+    required bool areaFilterActive,
+  }) {
     if (_loading) {
       return [
         SliverPadding(
@@ -874,12 +1038,44 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
 
     final slivers = <Widget>[];
 
+    final showAreaSections = areaFilterActive && areaLabel.isNotEmpty;
+
+    if (showAreaSections && primary.isNotEmpty) {
+      slivers.add(
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          sliver: SliverToBoxAdapter(
+            child: Row(
+              children: [
+                Icon(
+                  Icons.near_me_rounded,
+                  size: 18,
+                  color: AppColors.darkGreen.withOpacity(0.9),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    "In $areaLabel",
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                      color: AppColors.textDark,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (primary.isNotEmpty) {
       slivers.add(
         SliverPadding(
           padding: EdgeInsets.fromLTRB(
             16,
-            12,
+            showAreaSections ? 0 : 12,
             16,
             others.isNotEmpty ? 0 : 16,
           ),
@@ -890,11 +1086,61 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
       );
     }
 
-    if (primary.isNotEmpty && others.isNotEmpty) {
+    if (showAreaSections &&
+        primary.isEmpty &&
+        others.isNotEmpty &&
+        _items.isNotEmpty) {
+      slivers.add(
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          sliver: SliverToBoxAdapter(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.07),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.primary.withOpacity(0.28)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 22,
+                    color: AppColors.darkGreen.withOpacity(0.85),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      "No listings in $areaLabel in these results. "
+                      "Below are similar equipment from other areas.",
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        height: 1.35,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textDark.withOpacity(0.88),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if ((primary.isNotEmpty && others.isNotEmpty) ||
+        (showAreaSections && primary.isEmpty && others.isNotEmpty)) {
       slivers.add(
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              primary.isNotEmpty ? 18 : 8,
+              16,
+              10,
+            ),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
@@ -921,7 +1167,9 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    "Other locations",
+                    primary.isEmpty
+                        ? "Similar equipment — other locations"
+                        : "Other locations",
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.w700,
                       color: AppColors.textDark,

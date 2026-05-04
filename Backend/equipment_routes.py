@@ -111,8 +111,15 @@ def _doc_to_row(doc_id, data):
                     pass
         return default
 
-    nearest = g("Nearest_Major_District", "Nearest_Major_District", default="")
-    main_dist = _main_location(nearest) if nearest else ""
+    nearest = g(
+        "Nearest_Major_District",
+        "nearest_major_district",
+        "nearestMajorDistrict",
+        default="",
+    )
+    main_dist = g("Main_District", "main_district", "mainDistrict", default="")
+    if not main_dist and nearest:
+        main_dist = _main_location(nearest)
 
     return {
         "Equipment_ID": g("Equipment_ID", "equipmentId", default=doc_id),
@@ -182,6 +189,25 @@ def _invalidate_equipment_cache():
 
 def _norm(s: str) -> str:
     return (s or "").strip().lower()
+
+
+def _row_matches_location(row: dict, location: str) -> bool:
+    """
+    Match selected area against Main_District (e.g. Kurunegala) OR any substring of
+    Nearest_Major_District (e.g. Wariyapola in 'Kurunegala - Wariyapola').
+    Exact Main_District-only equality misses sub-areas when Main_District is the broad district.
+    """
+    needle = _norm(location)
+    if not needle:
+        return True
+    main = _norm(str(row.get("Main_District", "")))
+    nearest = _norm(str(row.get("Nearest_Major_District", "")))
+    if needle == main:
+        return True
+    if needle and needle in nearest:
+        return True
+    return False
+
 
 def _tokenize(q: str):
     q = _norm(q)
@@ -277,8 +303,17 @@ def health():
 def locations():
     try:
         rows = _get_all_equipment_rows()
-        locs = sorted({_safe_str(r.get("Main_District", "")) for r in rows if _safe_str(r.get("Main_District", ""))})
-        return jsonify({"locations": locs})
+        locs = set()
+        for r in rows:
+            md = _safe_str(r.get("Main_District", ""))
+            if md:
+                locs.add(md)
+            nearest = _safe_str(r.get("Nearest_Major_District", ""))
+            if nearest and "-" in nearest:
+                sub = nearest.split("-", 1)[1].strip()
+                if sub:
+                    locs.add(sub)
+        return jsonify({"locations": sorted(locs)})
     except FileNotFoundError as e:
         logger.warning("Equipment locations: %s", e)
         return jsonify({"error": str(e), "locations": []}), 503
@@ -388,7 +423,7 @@ def search():
     out = [r for r in rows]
 
     if location:
-        out = [r for r in out if _norm(str(r.get("Main_District", ""))) == location.lower()]
+        out = [r for r in out if _row_matches_location(r, location)]
 
     if typ:
         out = [r for r in out if typ.lower() in _norm(str(r.get("Equipment_Type", "")))]

@@ -39,7 +39,6 @@ class _LaborListScreenState extends State<LaborListScreen> {
   bool _loading = false;
   String? _error;
   List<LaborWorker> _items = [];
-  String? _primaryLocationFromQuery;
 
   @override
   void didChangeDependencies() {
@@ -125,7 +124,6 @@ class _LaborListScreenState extends State<LaborListScreen> {
 
     try {
       final q = _searchCtrl.text.trim();
-      _primaryLocationFromQuery = _extractLocationFromQuery(q);
 
       List<LaborWorker> list;
 
@@ -182,10 +180,20 @@ class _LaborListScreenState extends State<LaborListScreen> {
     return loc;
   }
 
+  /// Prefer explicit `... in District` from the search box; otherwise use the location dropdown.
+  String? _locationGroupKey() {
+    final fromQuery = _extractLocationFromQuery(_searchCtrl.text.trim());
+    if (fromQuery != null && fromQuery.trim().isNotEmpty) {
+      return fromQuery.trim();
+    }
+    final d = _selectedLocation.trim();
+    return d.isEmpty ? null : d;
+  }
+
   @override
   Widget build(BuildContext context) {
     final list = _items;
-    final primaryKey = _primaryLocationFromQuery?.toLowerCase().trim();
+    final primaryKey = _locationGroupKey()?.toLowerCase().trim();
 
     List<LaborWorker> primary = list;
     List<LaborWorker> others = const [];
