@@ -51,3 +51,5 @@ serviceAccountKey.json
 uploads/
 data/
 *.sqlite3
+Fertilizer-Recommendation-System-model/
+Crop-Train-Model/
