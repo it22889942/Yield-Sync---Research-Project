@@ -79,21 +79,21 @@ class BookingService {
       labourUid = fromPost;
     }
 
-    // Legacy fallback: look up classic labour account mapping users.labourId
+    // Legacy fallback: look up classic labour account mapping by labour id fields.
     if (labourUid == null || labourUid.isEmpty) {
-      final labourQ = await _db
-          .collection("users")
-          .where("userType", isEqualTo: "labour")
-          .where("labourId", isEqualTo: labourId)
-          .limit(1)
-          .get();
-      if (labourQ.docs.isNotEmpty) {
-        labourUid = labourQ.docs.first.id;
+      final candidateKeys = ["labourId", "Labour_ID", "labourID"];
+      for (final key in candidateKeys) {
+        final labourQ = await _db
+            .collection("users")
+            .where("userType", isEqualTo: "labour")
+            .where(key, isEqualTo: labourId)
+            .limit(1)
+            .get();
+        if (labourQ.docs.isNotEmpty) {
+          labourUid = labourQ.docs.first.id;
+          break;
+        }
       }
-    }
-
-    if (labourUid == null || labourUid.isEmpty) {
-      throw Exception("This labour has no linked account (createdByUid/labourUid missing).");
     }
 
     final days = _daysInRange(start, end);
@@ -140,7 +140,8 @@ class BookingService {
         "farmerEmail": farmerEmail,
 
         "labourId": labourId,
-        "labourUid": labourUid,
+        // Keep request possible even when profile UID mapping is missing in legacy data.
+        "labourUid": (labourUid ?? "").trim(),
         "startDate": _dateKey(start),
         "endDate": _dateKey(end),
         "type": halfDay ? "half-day" : "day",
