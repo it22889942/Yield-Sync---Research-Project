@@ -10,8 +10,6 @@ import '../../services/equipment_api.dart';
 import '../../services/recommendation_api.dart';
 import 'equipment_rent_screen.dart';
 
-enum _SortMode { best, cheapest, rating }
-
 /// Parsed from natural-language smart search (e.g. "below 1700").
 class _SmartPriceCap {
   const _SmartPriceCap({required this.value, required this.hourly});
@@ -146,8 +144,6 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
 
   /// When true: recommendation + semantic. When false: normal keyword search.
   bool _useSemanticSearch = true;
-
-  _SortMode _sort = _SortMode.best;
 
   @override
   void didChangeDependencies() {
@@ -291,7 +287,7 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
         _loading = false;
       });
 
-      _applySortAndFilter();
+      _rebuildViewList();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -430,25 +426,14 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
     return _SmartPriceCap(value: v, hourly: false);
   }
 
-  void _applySortAndFilter() {
+  /// Stable ordering for the grid (rating + bookings), no user-facing sort control.
+  void _rebuildViewList() {
     final v = [..._items];
-
-    switch (_sort) {
-      case _SortMode.best:
-        v.sort((a, b) {
-          final sa = (a.rating * 2.2) + (a.pastBookings * 0.04);
-          final sb = (b.rating * 2.2) + (b.pastBookings * 0.04);
-          return sb.compareTo(sa);
-        });
-        break;
-      case _SortMode.cheapest:
-        v.sort((a, b) => a.dailyRate.compareTo(b.dailyRate));
-        break;
-      case _SortMode.rating:
-        v.sort((a, b) => b.rating.compareTo(a.rating));
-        break;
-    }
-
+    v.sort((a, b) {
+      final sa = (a.rating * 2.2) + (a.pastBookings * 0.04);
+      final sb = (b.rating * 2.2) + (b.pastBookings * 0.04);
+      return sb.compareTo(sa);
+    });
     setState(() => _view = v);
   }
 
@@ -635,28 +620,6 @@ class _EquipmentListScreenState extends State<EquipmentListScreen> {
                             height: 32,
                             child: _equipmentListTypeChipsHorizontal(),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Text(
-                          "Sort by",
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 11.5,
-                            color: AppColors.textDark.withOpacity(0.72),
-                          ),
-                        ),
-                        const Spacer(),
-                        _SortButton(
-                          mode: _sort,
-                          onChanged: (m) {
-                            setState(() => _sort = m);
-                            _applySortAndFilter();
-                          },
                         ),
                       ],
                     ),
@@ -1534,70 +1497,6 @@ class _ModernEquipmentCard extends StatelessWidget {
           _iconForType(type),
           size: 52,
           color: AppColors.darkGreen.withOpacity(0.86),
-        ),
-      ),
-    );
-  }
-}
-
-// ===================== SORT BUTTON =====================
-class _SortButton extends StatelessWidget {
-  final _SortMode mode;
-  final ValueChanged<_SortMode> onChanged;
-
-  const _SortButton({required this.mode, required this.onChanged});
-
-  String _label(_SortMode m) {
-    switch (m) {
-      case _SortMode.best:
-        return "Best";
-      case _SortMode.cheapest:
-        return "Cheap";
-      case _SortMode.rating:
-        return "Rating";
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<_SortMode>(
-      onSelected: onChanged,
-      itemBuilder: (_) => [
-        PopupMenuItem(
-            value: _SortMode.best, child: Text(_label(_SortMode.best))),
-        PopupMenuItem(
-            value: _SortMode.cheapest, child: Text(_label(_SortMode.cheapest))),
-        PopupMenuItem(
-            value: _SortMode.rating, child: Text(_label(_SortMode.rating))),
-      ],
-      child: Container(
-        height: 40,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.sort_rounded, size: 20),
-            const SizedBox(width: 6),
-            Text(
-              _label(mode),
-              style: GoogleFonts.poppins(
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-                color: AppColors.textDark,
-              ),
-            ),
-            const SizedBox(width: 4),
-            Icon(
-              Icons.keyboard_arrow_down_rounded,
-              size: 20,
-              color: AppColors.textDark.withOpacity(0.55),
-            ),
-          ],
         ),
       ),
     );

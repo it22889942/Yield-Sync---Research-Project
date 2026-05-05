@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../utils/app_colors.dart';
+import 'add_review_screen.dart';
 
 class BookingLabourDetailsScreen extends StatelessWidget {
+  /// Firestore document id of the booking (for reviews).
+  final String bookingId;
   final String labourId;
 
   final String? startDate; // "2026-02-16"
@@ -13,6 +16,7 @@ class BookingLabourDetailsScreen extends StatelessWidget {
 
   const BookingLabourDetailsScreen({
     super.key,
+    required this.bookingId,
     required this.labourId,
     this.startDate,
     this.endDate,
@@ -311,7 +315,7 @@ class BookingLabourDetailsScreen extends StatelessWidget {
                         ],
                       ),
 
-                      // Sticky Back button (premium UX)
+                      // Bottom actions: review + back
                       Positioned(
                         left: 16,
                         right: 16,
@@ -332,24 +336,71 @@ class BookingLabourDetailsScreen extends StatelessWidget {
                                 ),
                               ],
                             ),
-                            child: SizedBox(
-                              height: 48,
-                              child: ElevatedButton.icon(
-                                onPressed: () => Navigator.pop(context),
-                                icon: const Icon(Icons.arrow_back_rounded),
-                                label: const Text(
-                                  "Back",
-                                  style: TextStyle(fontWeight: FontWeight.w900),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.primary,
-                                  foregroundColor: AppColors.darkGreen,
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 48,
+                                  child: ElevatedButton.icon(
+                                    onPressed: () {
+                                      final displayName =
+                                          name.trim().isEmpty || name == "—"
+                                              ? labourId
+                                              : name;
+                                      Navigator.push<void>(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => AddReviewScreen(
+                                            bookingId: bookingId,
+                                            itemType: "labour",
+                                            itemId: labourId,
+                                            itemName: displayName,
+                                            ownerName: displayName,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(Icons.rate_review_rounded),
+                                    label: const Text(
+                                      "Rate & review",
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.w900),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.primary,
+                                      foregroundColor: AppColors.darkGreen,
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 46,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () => Navigator.pop(context),
+                                    icon: const Icon(Icons.arrow_back_rounded,
+                                        size: 20),
+                                    label: const Text(
+                                      "Back",
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.w900),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: AppColors.textDark,
+                                      side:
+                                          const BorderSide(color: AppColors.border),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),

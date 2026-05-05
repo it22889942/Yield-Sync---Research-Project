@@ -144,13 +144,15 @@ class _MyLabourBookingsScreenState extends State<MyLabourBookingsScreen> {
                                     }
                                   : null,
                               acceptedHint: "Tap to view details",
-                              onTap: status == "accepted"
+                              onTap: (status == "accepted" ||
+                                      status == "completed")
                                   ? () {
                                       Navigator.push(
                                         context,
                                         MaterialPageRoute(
                                           builder: (_) =>
                                               BookingLabourDetailsScreen(
+                                            bookingId: d.id,
                                             labourId: labourId,
                                             labourUid: labourUid,
                                             startDate: start,

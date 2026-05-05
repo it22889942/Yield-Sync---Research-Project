@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../utils/app_colors.dart';
 import '../../services/equipment_booking_service.dart';
 import '../widgets/app_shell.dart';
+import 'add_review_screen.dart';
 
 class MyEquipmentBookingsScreen extends StatefulWidget {
   const MyEquipmentBookingsScreen({super.key});
@@ -35,8 +36,8 @@ class _MyEquipmentBookingsScreenState extends State<MyEquipmentBookingsScreen> {
     }
   }
 
-  static void _showOwnerDialog(
-      BuildContext context, Map<String, dynamic> booking) {
+  void _showOwnerDialog(
+      BuildContext parentContext, Map<String, dynamic> booking, String bookingDocId) {
     final equipmentId = (booking["equipmentId"] ?? "").toString();
     final start = (booking["startDate"] ?? "").toString();
     final end = (booking["endDate"] ?? "").toString();
@@ -47,9 +48,9 @@ class _MyEquipmentBookingsScreenState extends State<MyEquipmentBookingsScreen> {
     final ownerEmail = (booking["equipmentOwnerEmail"] ?? "—").toString();
 
     showDialog(
-      context: context,
+      context: parentContext,
       barrierDismissible: true,
-      builder: (_) => Dialog(
+      builder: (dialogContext) => Dialog(
         insetPadding: const EdgeInsets.fromLTRB(18, 24, 18, 24),
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -96,7 +97,7 @@ class _MyEquipmentBookingsScreenState extends State<MyEquipmentBookingsScreen> {
                       ),
                     ),
                     IconButton(
-                      onPressed: () => Navigator.pop(context),
+                      onPressed: () => Navigator.pop(dialogContext),
                       icon: Icon(
                         Icons.close_rounded,
                         color: AppColors.textDark.withOpacity(0.55),
@@ -133,13 +134,27 @@ class _MyEquipmentBookingsScreenState extends State<MyEquipmentBookingsScreen> {
                 _kvRow("Phone", ownerPhone),
                 _kvRow("Email", ownerEmail),
                 const SizedBox(height: 16),
-                Align(
-                  alignment: Alignment.centerRight,
+                SizedBox(
+                  width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.check_rounded, size: 20),
+                    onPressed: () {
+                      Navigator.pop(dialogContext);
+                      Navigator.of(parentContext).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => AddReviewScreen(
+                            bookingId: bookingDocId,
+                            itemType: "equipment",
+                            itemId: equipmentId,
+                            itemName:
+                                equipmentId.isEmpty ? "—" : "Equipment $equipmentId",
+                            ownerName: ownerName,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.rate_review_rounded, size: 20),
                     label: Text(
-                      "Done",
+                      "Rate & review",
                       style: GoogleFonts.poppins(
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.15,
@@ -150,9 +165,24 @@ class _MyEquipmentBookingsScreenState extends State<MyEquipmentBookingsScreen> {
                       foregroundColor: AppColors.darkGreen,
                       elevation: 0,
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 18, vertical: 12),
+                          horizontal: 18, vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                    label: Text(
+                      "Close",
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.15,
                       ),
                     ),
                   ),
@@ -310,8 +340,9 @@ class _MyEquipmentBookingsScreenState extends State<MyEquipmentBookingsScreen> {
                                     }
                                   : null,
                               acceptedHint: "Tap to view owner details",
-                              onTap: status == "accepted"
-                                  ? () => _showOwnerDialog(context, m)
+                              onTap: (status == "accepted" ||
+                                      status == "completed")
+                                  ? () => _showOwnerDialog(context, m, d.id)
                                   : null,
                             ),
                           );
