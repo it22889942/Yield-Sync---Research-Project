@@ -53,7 +53,7 @@ class _LoginScreenState extends State<LoginScreen> {
         // ✅ keep for old users (if any)
         Nav.clearAndGo(context, AppRoutes.sellerProfile);
       } else if (role == "admin") {
-        Nav.clearAndGo(context, AppRoutes.adminProfile);
+        Nav.clearAndGo(context, AppRoutes.home);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("User role not found. Contact admin.")),
